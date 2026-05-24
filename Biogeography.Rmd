@@ -1,0 +1,1815 @@
+---
+title: "Bioregionalisation of the Aegean Islands"
+author: '[Dr. Kostas Kougioumoutzis](https://www.kkougiou.github.io/)'
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    toc: 6
+    number_sections: true
+    includes:
+      after_body: footer.html
+    code_folding: show
+    df_print: kable
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+md_extensions: -autolink_bare_uris+hard_line_breaks
+csl: journal-of-biogeography.csl
+bibliography: My Collection_all.bib
+subtitle: Taxonomic & Phylogenetic Beta Diversity, Validation, and GDM
+editor_options:
+  chunk_output_type: console
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo       = TRUE,
+  message    = FALSE,
+  warning    = FALSE,
+  error      = FALSE,
+  tidy       = TRUE,
+  eval       = FALSE,
+  fig.align  = "center",
+  fig.width  = 9,
+  fig.height = 6,
+  dpi        = 300,
+  cache      = TRUE,
+  attr.source = ".numberLines"
+)
+```
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 400px;
+}
+```  
+  
+<style>
+body {
+text-align: justify}
+</style>  
+
+
+# Introduction
+
+This document walks through the full bioregionalisation workflow for the
+**Aegean Islands**, integrating taxonomic and phylogenetic beta
+diversity, hierarchical clustering, statistical validation, indicator
+species analysis, V-measure comparison and Generalized Dissimilarity
+Modelling (GDM). All analyses are reproducible — every intermediate
+object is cached in `RDS/` and every figure exported to `results/`. You can find and download everything we will do in this workshop from its Github repository: [Botany_Upatras_2026](https://github.com/kkougiou/Botany_Upatras_2026).
+
+# Setup
+
+## Load the libraries
+
+```{r libraries, eval = T}
+##============================================================================##
+## Load the libraries ----
+##============================================================================##
+library(picante)
+library(terra)        # Raster data (environmental grids)
+library(epm)
+library(sf)           # Vector data (points, polygons)
+library(rtrees)
+library(betapart)
+library(ape)
+library(ggdendro)
+library(dendextend)
+library(vegan)
+library(igraph)
+library(bioregion)    # bioregion ecosystem
+library(rnetcarto)
+library(maptree)      # KGS criterion for K
+library(cluster)
+library(tidyverse)    # dplyr, ggplot2, purrr, etc. for data wrangling
+library(zoo) 
+library(patchwork)    # plot composition
+library(phyloregion)
+library(furrr)
+library(future.apply)
+library(tidyterra)
+library(geodata)
+library(spatialEco)
+library(exactextractr)# Fast extraction of raster values inside polygons
+library(MetBrewer)    # palettes
+library(MexBrewer)    # palettes
+library(sabre)        # For biogeographical comparisons
+library(fpc)          # clusterboot
+library(indicspecies) # ISA
+library(Herodotools)  # affiliation helper
+library(mclust)       # adjustedRandIndex
+library(collinear)    # Variance Inflation Factors (VIF)
+library(gdm)          # Generalized Dissimilarity Modeling
+library(openxlsx)     # For exporting results to Excel
+library(gridExtra)    # For arranging multiple ggplot graphs
+library(caret)        # Machine-learning tools (zero-variance filtering)
+##============================================================================##
+```
+
+## Create output directories
+
+```{r output-dirs}
+##============================================================================##
+## Create output directories ----
+##============================================================================##
+dir.create("results", showWarnings = FALSE)
+dir.create("RDS",     showWarnings = FALSE)
+##============================================================================##
+```
+
+## Source helper functions
+
+```{r source-functions, eval = T}
+##============================================================================##
+## Source some functions needed to run the analyses ----
+##============================================================================##
+source("R Scripts/Several functions.R")
+##============================================================================##
+```
+
+# Data import
+
+## Biotic data
+
+For today's exercise, we will use a presence/absence matrix for 610 native plant taxa occurring in 48 Aegean islands.
+
+```{r biotic-data, eval = T}
+##============================================================================##
+## Load the biotic data ----
+##============================================================================##
+plants <- readxl::read_excel("Excel/Kiklades.xlsx")
+plants
+```
+
+## Abiotic data
+
+We will load 63 abiotic variables, which I have preprocessed to save us some time. 
+
+First, I assembled a high-resolution (1 km) monthly climate dataset for 2015, comprising 19 WorldClim bioclimatic variables (Fick and Hijmans 2017) and 16 additional environmental variables [@title_envirem_2018]. 
+
+I selected 2015 as the baseline year to ensure temporal compatibility across all abiotic predictors. 
+
+The 1 km resolution represents a pragmatic compromise between capturing environmentally meaningful heterogeneity and maintaining computational tractability and is considered appropriate for modelling distributions of these relatively range-restricted endemic taxa.
+
+Altitude data from the `CGIAR Consortium for Spatial Information` [@jarvis_hole-filled_2008-1], underpinned the dataset, which I processed using `ClimateEU` v4.63, together with the R packages `dismo` 1.1.4 [@hijmans_dismo_2017] and `envirem` 2.2 [@title_envirem_2018], following established protocols [@wang_climatewnahigh-resolution_2012; @hamann_comprehensive_2013; @marchi_climateeu_2020].
+
+Specifically, I fed the altitudinal data into `ClimateEU `v4.63 to generate monthly climate surfaces, from which I derived 37 climatic variables using the functions `biovars`, `ETsolradRasters`, and `generateEnvirem` from the `dismo` and `envirem` packages. 
+
+Temporally dynamic land use data originated from [@chen_global_2022], who produced global land use projections at 1 km resolution. The original dataset comprises 20 land use categories, which I converted into separate binary predictors. To reduce multicollinearity and improve model parsimony, I consolidated the 20 categories into six broader, ecologically meaningful classes: 'forests', 'shrubs', 'grasslands', 'barren', 'crops', and 'urban'. I performed this aggregation using the `terra` 1.7.46 [@hijmans_terra_2023] R package. For each aggregated class, I then generated continuous raster layers of Euclidean distance using the `distance` function from the same package, thereby capturing edge effects and spatial proximity to specific land-cover types. 
+
+I further incorporated soil metrics from SoilGrids [@hengl_soilgrids250m_2017], resampled where necessary to match the 1 km resolution of the remaining predictors. 
+
+Five topographical metrics, `aspect`, `heat load index`, `slope`, `topographic position index`, and `terrain ruggedness index`, were computed from the altitude data using functions in the R packages `terra` 1.7.46 (Hijmans 2023) and `spatialEco` 1.2-0 [@evans_spatialeco_2019]. 
+
+I also obtained rainfall soil erosivity data developed by Panagos et al. [@panagos_global_2023] and made available from the European Soil Data Centre [@panagos_european_2012; @panagos_european_2022], resampled to the same spatial resolution. Soil hydraulic properties, including `field capacity`, `moisture retention curve`, `saturated water content`, `wilting point`, `saturated hydraulic connectivity`, and `hydraulic conductivity curve` [@toth_3d_2017], were integrated into the environmental dataset at consistent resolution. 
+
+Additionally, I retrieved geomorphological, geological, hydrological, lithological, and soil richness data at 1 km resolution from Toivanen et al. [-@toivanen2024geodiversity]. 
+
+
+Finally, as a measure of human impact, I obtained Global Human Modification Index data from Kennedy et al. [-@kennedy_managing_2019] retaining the same spatial resolution as the other abiotic data. 
+
+```{r abiotic-data, eval = T}
+##============================================================================##
+## Load the abiotic data ----
+##============================================================================##
+abiotic <- rast('Rasters/Current abiotic variables.tif')
+abiotic
+```
+
+## Greek administrative boundaries
+
+Let's download the boundaries of Greece with the `geodata` R package.
+
+```{r greece-admin, eval = T}
+##============================================================================##
+## Download the administrative boundaries for Greece ----
+##============================================================================##
+greece_admin <- geodata::gadm(country = "GRC", level = 3, path = getwd())
+##============================================================================##
+```
+
+## Aegean Islands shapefile
+
+Let's load a shapefile with the 48 Aegean islands included in our dataset.
+
+```{r aegean-islands}
+##============================================================================##
+## Load the Aegean Islands shapefile ----
+##============================================================================##
+aegean_islands <- read_sf("Shapefiles/Aegean Islands.shp") %>% 
+  
+  ## Change the CRS to Greek grid to calculate the area of each island
+  st_transform(2100) %>% 
+  
+  ## Create a new column named Area
+  dplyr::mutate(Area = as.numeric(st_area(.))/ 1e6) %>% 
+  
+  ## Change the CRS back to WGS84
+  st_transform(4326)
+##============================================================================##
+```
+
+```{r load-slow-shp, include = FALSE, cache = TRUE, eval = T}
+aegean_islands <- read_sf("Shapefiles/Aegean Islands.shp") 
+```
+
+## Elevation data for Greece
+
+Just for demonstration, let's see how we can download altitudinal (among other) data with the `elevation_30s` function from the `geodata` R package. You can also look into the `elevatr` R package for less coarse data.
+
+```{r greece-elevation}
+##============================================================================##
+## Download the elevation data for Greece ----
+##============================================================================##
+greece_elevation <- geodata::elevation_30s(country = "GRC", mask = TRUE, path = getwd()) 
+greece_elevation <- greece_elevation %>% 
+  tidyterra::filter(GRC_elv_msk >= 0)
+
+terra::plot(greece_elevation)
+##============================================================================##
+```
+
+## Topographical variables
+
+Again, for demonstrative purposes only, let's see how we can calculate various topographical variables with functions from the `terra` R package.
+
+```{r topography}
+##============================================================================##
+## Create topographical data ----
+##============================================================================##
+slope  <- terrain(greece_elevation, "slope",  unit = "radians")
+aspect <- terrain(greece_elevation, "aspect", unit = "radians")
+hill   <- shade(slope, aspect, 30, 270)
+tpi    <- terrain(greece_elevation, "TPI")
+tri    <- terrain(greece_elevation, "TRI")
+hli    <- hli(greece_elevation, force.hemisphere = 'northern')
+##============================================================================##
+```
+
+## WorldClim climatic data
+
+And let's see how we can retrieve the standard 19 WorldClim variables (among others) with the `worldclim_country` function:
+
+```{r worldclim}
+##============================================================================##
+## Demonstrate how to download abiotic data ----
+##============================================================================##
+climate <- geodata::worldclim_country(country = "GRC", 
+                                      var = 'bio',
+                                      res = 10, 
+                                      path = getwd()) %>% 
+  terra::crop(., greece_admin, mask = TRUE, snap = 'in')
+climate
+plot(climate[[1]])
+
+mn_tm <- geodata::worldclim_country(country = "GRC", 
+                                    var = 'tmin',
+                                    res = 10, 
+                                    path = getwd()) %>% 
+  terra::crop(., greece_admin, mask = TRUE, snap = 'in')
+
+mx_tm <- geodata::worldclim_country(country = "GRC", 
+                                    var = 'tmax',
+                                    res = 10, 
+                                    path = getwd()) %>% 
+  terra::crop(., greece_admin, mask = TRUE, snap = 'in')
+
+prec <- geodata::worldclim_country(country = "GRC", 
+                                   var = 'prec',
+                                   res = 10, 
+                                   path = getwd()) %>%
+  terra::crop(., greece_admin, mask = TRUE, snap = 'in')
+##============================================================================##
+```
+
+## Median abiotic values per island
+
+We will now extract all abiotic data at the island level and calculate their median value using the `exactextract` function from the `exactextractr` 0.10.1 R package [@baston_package_2021].
+
+```{r median-abiotic}
+##============================================================================##
+## Create a dataframe with the median values for all the abiotic data in each island ----
+##============================================================================##
+exact_lulc <- exact_extract(abiotic,
+                            
+                            ## We need to convert the SpatVector to an sf object
+                            ## for the exact_extract function to work properly
+                            aegean_islands,
+                            
+                            ## We want the median value for each abiotic
+                            ## variable and island
+                            'median') %>% 
+  
+  ## We create a new column named Island based on the island names from our
+  ## dataframe
+  dplyr::mutate(Island = aegean_islands$Island) %>% 
+  
+  ## We move the newly created column to the beginning of the dataframe 
+  dplyr::select(Island, everything()) %>% 
+  as_tibble() %>%
+  
+  ## We remove the "median." prefix from the column names to make them more
+  ## readable
+  rename_with(~ str_remove(., "^median\\."), 
+              starts_with("median.")) %>% 
+  
+  ## We join the dataframe with the median values for each island with the
+  ## original shapefile to create a new sf object that contains both the median
+  ## values and the geometry of the islands
+  left_join(aegean_islands, ., by = "Island") 
+
+exact_lulc 
+##============================================================================##
+```
+
+
+```{r load-slow-file-exact, include = FALSE, cache = TRUE, eval = T}
+exact_lulc <- readRDS('RDS/Median values for the abiotic data for the Aegean islands.rds')
+```
+
+
+```{r save}
+##============================================================================##
+## Save it to disk ----
+##============================================================================##
+saveRDS(exact_lulc,
+        'RDS/Median values for the abiotic data for the Aegean islands.rds')
+##============================================================================##
+
+```
+
+```{r mapview, eval = T, cache = F}
+##============================================================================##
+## Plot it ----
+##============================================================================##
+mapview::mapview(aegean_islands)
+```
+
+# Phylogeny construction
+
+## Unique taxa
+
+```{r taxa-list, eval = T}
+##============================================================================##
+## Get the unique taxa for which to create the phylogeny ----
+##============================================================================##
+taxa <- plants %>% 
+  pivot_longer(
+    cols      = -Island,
+    names_to  = "Taxon", 
+    values_to = "presence"
+  ) %>% 
+  distinct(Taxon)
+##============================================================================##
+```
+
+## Megatree & phylogenetic tree
+
+```{r build-phylogeny}
+##============================================================================##
+## Pre-load the megatree ----
+##============================================================================##
+mega_tree <- megatrees::tree_plant_otl
+##============================================================================##
+
+##============================================================================##
+## Create the phylogenetic tree ----
+##============================================================================##
+phy <- get_tree(taxa$Taxon,
+                taxon    = 'plant',
+                scenario = "random_below_basal")
+
+saveRDS(phy, 'RDS/Phylogenetic tree for the Aegean taxa.rds')
+##============================================================================##
+```
+
+```{r load-slow-file-phy, include = FALSE, cache = TRUE, eval = T}
+phy <- readRDS('RDS/Phylogenetic tree for the Aegean taxa.rds')
+```
+
+
+## Match community matrix to phylogeny
+
+```{r match-comm-phy, eval = T, results = 'hide'}
+##============================================================================##
+## Create the community matrices and the phylogeny ----
+##============================================================================##
+comm <- picante::match.phylo.comm(phy, 
+                                  plants %>% 
+                                    as.data.frame())$comm
+phy  <- picante::match.phylo.comm(phy, 
+                                  plants %>% 
+                                    as.data.frame())$phy
+
+## Save it to disk if you want by removing the #
+# saveRDS(comm, 'RDS/Community matrix for the Aegean taxa.rds')
+
+rownames(comm) <- plants$Island
+##============================================================================##
+```
+
+## Sparse / dense conversion
+
+```{r prepare-comm, eval = T}
+##============================================================================##
+## Prepare the community matrix ----
+##============================================================================##
+if (!inherits(comm, "dgCMatrix")) {
+  comm_sparse <- Matrix(as.matrix(comm), sparse = TRUE)
+} else {
+  comm_sparse <- comm
+}
+
+# Convert to a dense presence/absence matrix
+if (inherits(comm_sparse, "sparseMatrix")) {
+  comm_dense <- as.matrix(comm_sparse)
+} else {
+  comm_dense <- as.matrix(comm)
+}
+
+# Ensure strict presence/absence
+comm_dense[comm_dense > 0] <- 1
+storage.mode(comm_dense) <- "integer"
+##============================================================================##
+```
+
+# Beta diversity
+
+## Taxonomic beta diversity 
+
+We will compute taxonomic and phylogenetic beta diversity and their components using the betapart 1.6.1 R package [@baselga_textlesstttextgreaterbetaparttextlesstttextgreater_2012]. More specifically, for both Taxonomic Beta Diversity (TBD) and Phylogenetic Beta Diversity (PBD), overall dissimilarity (Sørensen index, β_sor) was partitioned into its turnover (Simpson index, β_sim) and nestedness-resultant (β_sne) components. All subsequent macroecological and biogeographical analyses focus on β_sim, as it is a metric well-suited for bioregionalization analyses, since it’s insensitive to interregional richness differences [@baselga_partitioning_2010; @kreft_contrasting_2010]. 
+
+
+To distinguish true spatial turnover from artifacts caused by richness gradients (alpha diversity differences), we should have constructed null models for TBD by applying the conservative independent swap algorithm for 999 matrix permutations, which preserves both site richness (row sums) and species occurrence frequencies (column sums), using the `randomizeMatrix` function from the `picante` 1.8.2 R package and then calculate the Standardized Effect Sizes (SES) and significance (p-values) of pairwise turnover. If anyone is interested doing that, feel free to contact me to provide the relevant R code.
+
+
+```{r taxonomic-bd, eval = T}
+##============================================================================##
+## Compute OBSERVED taxonomic beta diversity ----
+##============================================================================##
+obs_beta <- betapart::beta.pair(comm_dense, index.family = "sorensen")
+
+# Extract as numeric vectors (one value per pairwise comparison)
+obs_sor <- as.numeric(obs_beta$beta.sor)   # Total Sørensen dissimilarity
+obs_sim <- as.numeric(obs_beta$beta.sim)   # Turnover (Simpson)
+obs_sne <- as.numeric(obs_beta$beta.sne)   # Nestedness-resultant
+
+obs_sim_dist <- obs_beta$beta.sim
+obs_sor_dist <- obs_beta$beta.sor
+obs_sne_dist <- obs_beta$beta.sne
+
+## Save it to disk if you want by removing the #
+# saveRDS(obs_sor_dist, 'RDS/Taxonomic_observed_sorensen.rds')
+# saveRDS(obs_sim_dist, 'RDS/Taxonomic_observed_simpson.rds')
+# saveRDS(obs_sne_dist, 'RDS/Taxonomic_observed_nestedness.rds')
+##============================================================================##
+```
+
+## Phylogenetic beta diversity 
+
+PBD will be calculated using the function `phylobeta` from the `phyloregion` 1.0.9 R package [@daru_phyloregion_2020; @daru_endemism_2020; @daru_understanding_2017]. 
+
+To ensure robustness, pairwise phylogenetic distances should be computed across at least 100 phylogenetic trees, and the mean pairwise distances should be extracted to form the final PBD matrices. Due to time constraints, this will not be done here and now, but a relevant R script is provided for anyone interested in running this type of analysis. 
+
+
+```{r phylogenetic-bd, eval = T}
+##============================================================================##
+## Calculate the phylogenetic beta diversity ----
+##============================================================================##
+obs_pbd <- phyloregion::phylobeta(comm_sparse, 
+                                  phy,
+                                  index = "sorensen")
+
+# Extract as numeric vectors (one value per pairwise comparison)
+obs_sor_pbd <- as.numeric(obs_pbd$phylo.beta.sor)   # Total Sørensen dissimilarity
+obs_sim_pbd <- as.numeric(obs_pbd$phylo.beta.sim)   # Turnover (Simpson)
+obs_sne_pbd <- as.numeric(obs_pbd$phylo.beta.sne)   # Nestedness-resultant
+
+obs_sim_pbd_dist <- obs_pbd$phylo.beta.sim
+obs_sor_pbd_dist <- obs_pbd$hylo.beta.sor
+obs_sne_pbd_dist <- obs_pbd$phylo.beta.sne
+
+## Save it to disk if you want by removing the #
+# saveRDS(obs_sor_pbd_dist, 'RDS/Phylogenetic_observed_sorensen.rds')
+# saveRDS(obs_sim_pbd_dist, 'RDS/Phylogenetic_observed_simpson.rds')
+# saveRDS(obs_sne_pbd_dist, 'RDS/Phylogenetic_observed_nestedness.rds')
+##============================================================================##
+```
+
+## Reload distance matrices
+
+```{r reload-distances}
+##============================================================================##
+## Rename the distance matrics for ease of use ----
+##============================================================================##
+phylo_sim <- readRDS('RDS/Phylogenetic_observed_simpson.rds')
+tax_sim   <- readRDS('RDS/Taxonomic_observed_simpson.rds') 
+##============================================================================##
+```
+
+```{r load-slow-file, include = FALSE, cache = TRUE, eval = T}
+phylo_sim <- readRDS('RDS/Phylogenetic_observed_simpson.rds')
+tax_sim   <- readRDS('RDS/Taxonomic_observed_simpson.rds') 
+```
+
+```{r reload-attr, eval = T}
+##============================================================================##
+## Ensure labels are perfectly aligned ----
+##============================================================================##
+attr(tax_sim,   "Labels") <- plants$Island
+attr(phylo_sim, "Labels") <- plants$Island
+##============================================================================##
+```
+
+# Hierarchical clustering
+
+## Linkage selection (cophenetic correlation)
+
+Hierarchical clustering nests sites into groups, but the result depends entirely on the linkage rule — i.e., how distance between two clusters is defined once they start merging.
+
+To select the linkage algorithm best representing the floristic divergences among islands without imposing a particular hierarchical structure a priori, we will test various commonly applied hierarchical clustering algorithms on each turnover-component dissimilarity matrix using the function `hclust` of the `stats` 4.5.3 R package (R Core Team 2026): 
+
+- **Ward's minimum-variance criterion** (Ward's D and Ward's D₂), 
+- **single linkage**, 
+- **complete linkage**, 
+- **unweighted pair-group method with arithmetic mean** (UPGMA), 
+- **unweighted pair-group method using centroids** (UPGMC) and 
+- **weighted pair-group method with arithmetic mean** (WPGMA), 
+
+following Kreft and Jetz (2010) and Holt et al. (2013). 
+
+For each dendrogram, we will compute the cophenetic correlation coefficient (Sokal and Rohlf 1962) as the Pearson correlation between the original pairwise dissimilarities and the cophenetic distances extracted from the dendrogram (i.e., the heights at which any two leaves are first joined), using the `cophenetic` function of the stats 4.5.3 R package (R Core Team, 2026). 
+
+Conceptually, this coefficient quantifies the extent to which the dendrogram preserves the metric structure of the input dissimilarity matrix, with values closer to 1 indicating less topological distortion. 
+
+The linkage method yielding the highest cophenetic correlation will be retained for all downstream analyses, providing an objective, distortion-minimising basis for the dendrogram topology rather than a choice based on convention or visual inspection.
+
+So, `evaluate_linkage()` fits eight standard rules (ward.D, ward.D2, single, complete, average, mcquitty, median, centroid) and asks: how faithful is each resulting tree to the original pairwise distances?
+
+For each method we compute the cophenetic correlation — the Pearson correlation between 
+- the original distances and 
+- the heights at which each pair of sites is first joined in the dendrogram. 
+
+Again, a value near 1 means the tree preserves the input distances almost perfectly. The method with the **highest** cophenetic correlation is the best choice for hierarchical clustering. 
+
+Note that this is not a test of statistical significance, but a way to choose the most faithful representation of the original distances.
+
+```{r linkage-selection, eval = T}
+##============================================================================##
+## Choose the best linkage method with evaluate_linkage() ----
+##============================================================================##
+linkage_phylo <- evaluate_linkage(phylo_sim)
+linkage_phylo
+
+linkage_tax   <- evaluate_linkage(tax_sim)
+linkage_tax
+
+## We pick the "winner" method for each matrix and save it for later use in the
+## clustering step
+link_method <- "average" ## Same method for both matrices for easier comparison
+
+hc_phylo <- hclust(phylo_sim, method = link_method)
+hc_tax   <- hclust(tax_sim,   method = link_method)
+
+# These two hclust objects are the trees we will cut, evaluate, and visualise.
+##============================================================================##
+```
+
+## Optimal number of regions (KGS)
+
+Once we have a tree we still need to decide where to cut it. Cutting too high gives one mega-region; cutting too low gives one cluster per island. 
+
+We use the KGS (Kelley–Gardner–Sutcliffe) penalty from the `maptree` package, which balances two opposing criteria: 
+- the within-cluster spread (penalised when clusters are heterogeneous, i.e. cutting too high) and 
+- the between-cluster cost (penalised when many clusters are very similar, i.e. cutting too low). 
+
+The optimal K **minimises** the sum of both penalties.
+
+We will turn this into a publication-ready plot in `plot_kgs()` later.
+
+```{r optimal-k, eval = T}
+##============================================================================##
+## Find the optimal number of regions with find_optimal_k() ----
+##============================================================================##
+opt_phylo <- find_optimal_k(hc_phylo, phylo_sim)
+opt_phylo$optimal_k
+opt_phylo$kgs_df
+
+opt_tax   <- find_optimal_k(hc_tax, tax_sim)
+opt_tax$optimal_k
+opt_tax$kgs_df
+```
+
+## Silhouettes
+
+What `silhouette()` does? 
+
+For every site is the mean distance from to sites in the nearest other cluster. 
+- Values near +1 mean the site is well inside its region
+- values near 0 mean it sits on a boundary
+- negative values mean the site would actually fit better in a neighbouring region.
+
+You see a matrix with one row per island (cluster ID, neighbour cluster, silhouette width). The summary() reports the mean silhouette per cluster and overall. 
+
+> Rule of thumb: We will plot the per-island bars with `plot_silhouette()`.
+
+```{r cut-silhouette, eval = T}
+##============================================================================##
+## Cut the tree and compute silhouettes ----
+##============================================================================##
+clusters_phylo <- cutree(hc_phylo, k = opt_phylo$optimal_k)
+clusters_tax   <- cutree(hc_tax,   k = opt_tax$optimal_k)
+
+sil_phylo <- silhouette(clusters_phylo, phylo_sim)
+sil_tax   <- silhouette(clusters_tax,   tax_sim)
+
+summary(sil_phylo)
+summary(sil_tax)
+```
+
+# Statistical validation
+
+Hierarchical clustering will always hand back a partition, even from random noise. So we need to test whether the partition is statistically and practically meaningful. The function runs four complementary checks:
+
+- **NMDS** (`vegan::metaMDS`). Non-metric multidimensional scaling projects the 48   islands into 2-D so we can see whether islands in the same cluster sit close   together. The reported stress tells us how much the 2-D projection distorts   the original distances (< 0.10 excellent, 0.10–0.20 fair, > 0.20 poor).
+
+- **PERMANOVA** (`vegan::adonis2`). A permutational MANOVA testing the null hypothesis: the mean compositional centroid is identical across clusters. A small p (< 0.05) means clusters truly differ in composition; the reported R^2 tells us how much variance the partition explains.
+
+- **β-dispersion** (`vegan::betadisper + permutest`). Tests whether clusters differ in their internal heterogeneity. This is a sanity check for PERMANOVA: if dispersions differ a lot, a *significant* PERMANOVA could be picking up spread rather than centroid differences.
+
+- **Cluster stability** (f`pc::clusterboot)`. Bootstraps the data 999 times, re-clusters each replicate, and reports — for every cluster — its mean Jaccard similarity to its bootstrap counterpart. 
+Rule of thumb: > 0.75 stable, 0.60–0.75 cautious, < 0.60 unstable.
+
+No plot is drawn here, but the returned object contains everything ready to plot: 
+- `val_phylo$nmds_df` (tidy NMDS coordinates)
+-`val_phylo$nmds_stress`,
+- `val_phylo$permanova`, 
+- `val_phylo$dispersion`, and
+- `val_phylo$stability` (one Jaccard mean per cluster). 
+
+We turn the NMDS into a panel with later.
+
+```{r validation, eval = T, results = 'hide', message = FALSE, warning = FALSE}
+##============================================================================##
+## Statistical validation with validate_bioregion() ----
+##============================================================================##
+val_phylo <- validate_bioregion(phylo_sim, clusters_phylo,
+                                hclust_method = link_method,
+                                k             = opt_phylo$optimal_k)
+
+val_tax   <- validate_bioregion(tax_sim, clusters_tax,
+                                hclust_method = link_method,
+                                k             = opt_tax$optimal_k)
+```
+
+```{r nmds, eval = T}
+##============================================================================##
+## See the results ----
+##============================================================================##
+val_tax$nmds_stress
+val_tax$permanova
+val_tax$stability
+```
+
+# Indicator Species Analysis
+
+A bioregion is more than a clustering label — biologically, we want to know which species characterise each region. 
+
+ISA (`indicspecies::multipatt` with the point-biserial-correlation variant r.g) tests, for every species, whether it is over-represented in one cluster (or combination of clusters) relative to the rest, and gives a permutation p-value.
+
+In other words, an indicator species analysis (ISA) is used to identify any taxa that could distinguish each cluster by estimating Pearson's phi coefficient of association, corrected for differences in group size using the function `multipatt` from the indicspecies 1.8.0 R package.
+
+isa_phylo is a data frame with one row per species: 
+- the cluster (or combination of clusters) it indicates, 
+- an association strength (stat), and 
+- p.value. 
+
+Filtering on p.value <= 0.05 gives the diagnostic-species list — exactly what you would put in a regional floristic table.
+
+```{r isa}
+##============================================================================##
+## Indicator Species Analysis with run_isa() ----
+##============================================================================##
+isa_phylo <- run_isa(comm, clusters_phylo)
+summary(isa_phylo)
+
+isa_tax   <- run_isa(comm, clusters_tax)
+summary(isa_tax)
+```
+
+# The `bioregion` ecosystem 
+
+## Convert distances to bioregion format
+The `bioregion package` does not accept a base-R dist object; it needs a long data frame with three columns (Site1, Site2, value) and the S3 class `bioregion.pairwise.metric`.
+
+The function: 
+- flattens the lower triangle of the matrix,
+- attaches the class plus the type = "dissimilarity" attribute, and 
+- returns the data frame
+
+You see a tibble with with Site1, Site2, Simpson. No new analysis happens here — but every downstream `bioregion::*` call needs this object.
+
+```{r convert-bioregion, eval = T}
+##============================================================================##
+## Convert to the bioregion-package format with convert_dist_to_bioregion() ----
+##============================================================================##
+dissim_phylo_br <- convert_dist_to_bioregion(phylo_sim, metric_name = "Simpson")
+dissim_tax_br   <- convert_dist_to_bioregion(tax_sim,   metric_name = "Simpson")
+
+head(dissim_phylo_br)
+```
+
+## Hierarchical clustering inside `bioregion`
+
+It is essentially the same UPGMA we ran in the first step, but inside the `bioregion` ecosystem so the result inherits the `bioregion.clusters` class and is recognised by the package's downstream tools (network metrics, contribution metrics, comparison utilities). 
+
+We feed the same link_method and the same K we already validated, so the partition is identical to `clusters_phylo` / `clusters_tax`. We just need it in bioregion format for the next step.
+
+```{r bioregion-hclust, eval = T}
+##============================================================================##
+## Hierarchical clustering inside the bioregion framework with hclu_hierarclust() ----
+##============================================================================##
+hier_phylo <- hclu_hierarclust(dissim_phylo_br,
+                               index   = "Simpson",
+                               method  = link_method,
+                               n_clust = opt_phylo$optimal_k)
+
+hier_tax   <- hclu_hierarclust(dissim_tax_br,
+                               index   = "Simpson",
+                               method  = link_method,
+                               n_clust = opt_tax$optimal_k)
+##============================================================================##
+```
+
+## Region-level metrics
+
+For each region this function computes summary metrics describing the region's biotic identity:
+
+- **n_sites** — how many islands belong to it
+
+- **n_species** — total species richness across those islands
+
+- **end_species** — species found only in that region (regional endemics within our pool)
+
+- **end_richness** — proportion of regional species that are exclusive to it (the endemism rate)
+
+- **rho**: the coherence metric of Lenormand et al. [-@lenormand_biogeographical_2019]: how strongly species are associated with the region versus with the rest of the network. Higher p = more cohesive, biologically distinct region
+
+You see a small data frame with one row per region. These rows go straight into the results table for any paper you might want to publish.
+
+```{r bioregion-metrics, eval = T}
+##============================================================================##
+## Region-level descriptive metrics with bioregion_metrics_fixed() ----
+##============================================================================##
+
+## Ensure that the community matrix has the island names
+rownames(comm_sparse) <- hier_phylo$clusters$ID
+
+metrics_phylo <- bioregion_metrics_fixed(bioregionalization = hier_phylo,
+                                         comat              = comm_sparse %>% sparse2dense,
+                                         map                = aegean_islands %>% 
+                                           dplyr::mutate(ID = 1:48), 
+                                         col_bioregion      = 1)
+metrics_phylo
+
+metrics_tax   <- bioregion_metrics_fixed(bioregionalization = hier_tax,
+                                         comat              = comm_sparse %>% sparse2dense,
+                                         map                = aegean_islands %>% 
+                                           dplyr::mutate(ID = 1:48), 
+                                         col_bioregion      = 1)
+metrics_tax
+```
+
+## Island-level affiliation
+
+A clustering label is binary — "this island is in region 2" — but biologically that is an oversimplification. Some peaks are deep in their region's core, others are near a boundary and could plausibly belong to a neighbouring region. 
+
+So, we will quantify the affiliation strength of each Aegean island to its assigned biogeographical region or cluster using a modified version of the `calc_affiliation_evoreg` function from the [Herodotools](https://gabrielnakamura.github.io/Herodotools/) 2.0.1 R package. 
+
+- Values approaching 1 indicate strong affiliation with a single region
+- Values near 0 denote transitional characteristics between regions
+
+You see a small data frame with one row per island and an affiliation column. This is the variable we will use to colour the affiliation map. Islands painted in deep colours are strongholds so to speak; pale ones are transition peaks — biogeographically the most interesting cases.
+
+```{r affiliation, eval = T}
+##============================================================================##
+## Island-level affiliation with calc_affiliation_evoreg_fixed() ----
+##============================================================================##
+afi_phylo <- calc_affiliation_evoreg_fixed(phylo.comp.dist = phylo_sim,
+                                           groups          = factor(clusters_phylo))
+
+afi_tax   <- calc_affiliation_evoreg_fixed(phylo.comp.dist = tax_sim,
+                                           groups          = factor(clusters_tax))
+
+head(afi_phylo)
+```
+
+# Figures
+
+## Build the spatial bioregion objects
+
+`clusters_phylo` is a named integer vector (names = island names, values = cluster IDs). 
+
+We pull the cluster ID for every polygon, convert it to a factor (so ggplot2 legends behave), and attach the matching hex colour for convenience. 
+
+The result is an sf object with two new columns 
+
+You see a spatial data frame with one row per island, with cluster and color columns appended. 
+
+```{r bioregion-sf, eval = T}
+##============================================================================##
+## Join clusters back to the shapefile to build bioregion_sf ----
+##============================================================================##
+bioregion_sf_phylo <- aegean_islands %>% 
+  dplyr::mutate(cluster = factor(clusters_phylo[as.character(Island)]),
+                color   = pal_phylo[as.character(cluster)])
+
+bioregion_sf_tax <- aegean_islands %>% 
+  dplyr::mutate(cluster = factor(clusters_tax[as.character(Island)]),
+                color   = pal_tax[as.character(cluster)])
+##============================================================================##
+```
+
+## Cophenetic correlations
+
+```{r cophenetic, eval = T}
+##============================================================================##
+## Manually compute the correlation ----
+##============================================================================##
+r_coph_phylo <- cor(cophenetic(hc_phylo), phylo_sim)
+r_coph_tax   <- cor(cophenetic(hc_tax),   tax_sim)
+##============================================================================##
+```
+
+## Region colours
+
+A bioregion analysis only "reads" if the same colour is used for the same cluster in every panel — dendrogram, map, KGS curve, silhouette bars, NMDS ellipses, affiliation map. 
+
+`get_palette()` is a thin wrapper around the requested `ggsci` palette function (npg, aaas, lancet, nejm, …). 
+
+Given a number of clusters k, it returns a named character vector of hex colours of length k, with names equal to "1", "2", …, "k". 
+
+By having the names match the cluster IDs returned by `cutree()`, every downstream plot can do `scale_*_manual(values = pal)` and the colour assignment is automatic and consistent.
+
+```{r palettes, eval = T}
+##============================================================================##
+## Generate region colours with get_palette() ----
+##============================================================================##
+pal_phylo <- get_palette(k = opt_phylo$optimal_k, scheme = 'npg')
+pal_tax   <- get_palette(k = opt_tax$optimal_k,   scheme = 'npg')
+
+pal_phylo
+pal_tax
+```
+
+## Assemble the `res_*` lists
+
+Now we assemble the `res_*` lists in the same shape the wrapper would have returned, so every `plot_*` function can read from them unchanged:
+
+```{r dend-slow-file, include = FALSE, cache = TRUE, eval = T}
+##============================================================================##
+## Align colours with the dendrogram leaves with build_dend_data() ----
+##============================================================================##
+dend_phylo <- build_dend_data(hc  = hc_phylo,
+                              k   = clusters_phylo,
+                              pal = pal_phylo)
+
+dend_tax   <- build_dend_data(hc  = hc_tax,
+                              k   = clusters_tax,
+                              pal = pal_tax)
+
+str(dend_phylo, max.level = 1)
+```
+
+
+```{r res-lists, eval = T}
+##============================================================================##
+## Assembly the res_* lists ----
+##============================================================================##
+res_phylo <- list(
+  dist_mat     = phylo_sim,
+  hc           = hc_phylo,
+  r_coph       = r_coph_phylo,
+  optimal_k    = opt_phylo$optimal_k,
+  kgs_df       = opt_phylo$kgs_df,
+  clusters     = clusters_phylo,
+  silhouette   = sil_phylo,
+  palette      = pal_phylo,
+  dend_data    = dend_phylo,
+  bioregion_sf = bioregion_sf_phylo,
+  id_col       = "Island"
+)
+
+res_tax <- list(
+  dist_mat     = tax_sim,
+  pal_aligned  = dend_tax$pal_aligned,
+  ggd          = tax_dend_dat$ggd,
+  hc           = hc_tax,
+  r_coph       = r_coph_tax,
+  optimal_k    = opt_tax$optimal_k,
+  kgs_df       = opt_tax$kgs_df,
+  clusters     = clusters_tax,
+  silhouette   = sil_tax,
+  palette      = pal_tax,
+  dend_data    = dend_tax,
+  bioregion_sf = bioregion_sf_tax,
+  id_col       = "Island"
+)
+##============================================================================##
+```
+
+
+## Dendrograms, KGS, Silhouette  and a map
+
+### Dendrogram 
+
+`plot_dendroram` reads `res$dend_data$segments` to draw the branches with `geom_segment()`, then `res$dend_data$labels_df` to draw the italic island names with `geom_text()`, with horizontal alignment chosen so the labels sit just past the leaves. 
+
+The y-axis is the β_sim merging height. The cophenetic correlation `r_coph` is annotated in the top-right corner via `annotate("text", …, label = paste("r =", round(res$r_coph, 3)))`.
+
+You see a horizontal dendrogram in which each clade is painted in its region's colour, internal grey branches mark the merges between regions, and the height at which two clades fuse is the β_sim dissimilarity at which those island groups become indistinguishable. 
+
+The annotated `r_coph` tells them how faithfully the tree preserves the original distances — values above 0.75 are good, above 0.85 excellent.
+
+
+## Coloured dendrogram data
+
+A hclust object stores merges in merge order, but cutree() labels are in original site order, and ggplot reads dendrograms in visual leaf order from left to right. If we naively colour leaves by clusters[i] we get a chromatic catastrophe. build_dend_data() resolves this
+by:
+
+- Calling `dendextend::as.dendrogram(hc)` and walking the leaves to recover the left-to-right leaf order. 
+
+- Re-ordering clusters to that order, then mapping each leaf to its colour via `palette[as.character(clusters)]`.
+
+- Colouring branches: each internal branch is painted with the cluster colour if all its descendants belong to the same cluster, else grey. Done with `dendextend::color_branches()` / `set("branches_col", …)`.
+
+- Returning a list with at least: `dend` (the coloured dendrogram object), `segments` (a data frame produced by `ggdendro::dendro_data()` for ggplot2), `labels_df` (a data frame with x, y, label, cluster, color for every leaf — used to draw the italic island names in the right colour).
+
+```{r dendrogram-data, eval = T}
+##============================================================================##
+## Align colours with the dendrogram leaves with build_dend_data() ----
+##============================================================================##
+dend_phylo <- build_dend_data(hc  = hc_phylo,
+                              k   = clusters_phylo,
+                              pal = pal_phylo)
+
+dend_tax   <- build_dend_data(hc  = hc_tax,
+                              k   = clusters_tax,
+                              pal = pal_tax)
+```
+
+
+### KGS 
+
+`plot_kgs` plots `res$kgs_df$k` on the x-axis and `res$kgs_df$penalty` on the y-axis as a `geom_line()` with `geom_point()`. 
+
+The optimal K is highlighted with a larger filled point in the cluster's own colour (`pal[as.character(optimal_k)]`) and labelled via `geom_label_repel()`.
+
+You see a U-shaped (or hockey-stick) curve. 
+
+The minimum corresponds to the K that best balances within-cluster homogeneity and between-cluster distinctness. 
+
+The highlighted point is the chosen partition. If the curve is very flat near the minimum, several Ks are roughly equivalent and your choice is robust; a sharply pointed minimum means the optimal K is unambiguous.
+
+### Silhouette
+
+`plot_silhouette` converts `res$silhouette` (a `cluster::silhouette` object) into a tidy data frame with one row per island (island, cluster, sil_width, neighbour), sorts rows by cluster then descending silhouette width, and draws horizontal geom_col() bars filled with pal. 
+
+A dashed grey horizontal line marks the mean silhouette, annotated numerically.
+
+You see one bar per island, grouped by region and colour-matched.
+
+- Tall bars (close to +1) = well-classified islands, deep in their region. 
+- Short or negative bars = islands sitting on a boundary or arguably misclassified.
+
+Compare the mean silhouette:
+
+- >= 0.50 strong,
+- 0.25 – 0.50 acceptable, 
+- <= 0.25 weak partition.
+
+### Map
+
+`plot_map` uses `geom_sf(data = res$bioregion_sf, aes(fill = cluster))` plus `scale_fill_manual(values = res$palette)` to paint every polygon in its region's colour. 
+
+Adds island labels with `geom_sf_text()` (or `ggrepel::geom_text_repel()` with `stat = "sf_coordinates"`).
+
+
+You see the Aegean basin painted in coloured patches. Spatially contiguous patches mean a region is geographically coherent (e.g., Cyclades sticking together). Scattered same-coloured polygons mean two distant islands share an ecological identity that is not explained by proximity — a much more interesting biogeographical story.
+
+
+```{r preview-tax, eval = T}
+##============================================================================##
+## Generate aesthetic data ----
+##============================================================================##
+tax_pal      <- get_palette(opt_tax$optimal_k)
+tax_dend_dat <- build_dend_data(hc_tax, opt_tax$optimal_k, tax_pal)
+
+# Package everything into a list for the plotting wrappers
+res_tax <- list(
+  ggd          = tax_dend_dat$ggd, 
+  pal_aligned  = tax_dend_dat$pal_aligned,
+  r_coph       = linkage_tax$cophenetic_r[1],
+  kgs_df       = opt_tax$kgs_df, 
+  optimal_k    = opt_tax$optimal_k,
+  palette      = tax_pal,
+  sil          = sil_tax,
+  bioregion_sf = aegean_islands %>%
+    mutate(color = tax_dend_dat$pal_aligned[as.character(clusters_tax)])
+)
+
+# Render the plots
+p_dend_tax <- plot_dendrogram(res_tax,  tag = "(a)")
+p_kgs_tax  <- plot_kgs(res_tax,         tag = "(b)")
+p_sil_tax  <- plot_silhouette(res_tax,  tag = "(c)")
+p_map_tax  <- plot_map(res_tax,         tag = "(d)")
+
+p_dend_tax
+
+p_kgs_tax
+
+p_sil_tax
+
+p_map_tax
+
+# Composite figure - I won't plot it here
+# (p_dend_tax | p_map_tax) / (p_kgs_tax | p_sil_tax) + 
+#   plot_layout(heights = c(2, 1))
+##============================================================================##
+```
+
+## NMDS
+
+To visualise the pairwise floristic relationships among the Aegean islands, we projected each turnover-component dissimilarity matrix into a two-dimensional space using non-metric multidimensional scaling (NMDS), implemented through the `metaMDS` function of the vegan 2.7.3 R package [@oksanen_vegan_2018]. 
+
+Here we read `val$nmds_df `(NMDS coordinates produced by `metaMDS()` inside `validate_bioregion()`), draw points coloured by region, add repelled island labels, and overlay 95 % confidence ellipses per cluster with `stat_ellipse(type = "norm", level = 0.95)`. The stress value is annotated bottom-right.
+
+You see a 2-D scatter of the Aegean islands in compositional space. 
+
+Tight, well-separated coloured ellipses validate the partition. Overlapping ellipses warn that, although the dendrogram cut yields distinct clusters, the multivariate cloud does not really separate them. 
+
+The stress tells them how trustworthy this 2-D view is: 
+
+- <= 0.10 excellent, 
+- 0.10–0.20 fair, 
+- >= 0.20 don't over-interpret distances on the plot
+
+```{r plot-nmds, eval = T}
+##============================================================================##
+## plot_nmds() ----
+##============================================================================##
+p_nmds_phylo <- ggplot(val_phylo$nmds_df,
+                       aes(x = NMDS1, 
+                           y = NMDS2, 
+                           colour = Cluster)) +
+  geom_point(size = 4) +
+  ggrepel::geom_text_repel(aes(label = Mountain),
+                           size        = 3, 
+                           show.legend = FALSE) +
+  stat_ellipse(level    = 0.95, 
+               linetype = 2,
+               alpha    = 0.5) +
+  scale_colour_manual(values = res_phylo$palette) +
+  theme_bw() +
+  labs(title    = paste("NMDS:", "PBD"),
+       subtitle = paste("Stress =", round(val_phylo$nmds_stress, 3)))
+
+p_nmds_phylo
+
+p_nmds_tax <- ggplot(val_tax$nmds_df,
+                     aes(x = NMDS1, 
+                         y = NMDS2, 
+                         colour = Cluster)) +
+  geom_point(size = 4) +
+  ggrepel::geom_text_repel(aes(label = Mountain),
+                           size        = 3, 
+                           show.legend = FALSE) +
+  stat_ellipse(level    = 0.95, 
+               linetype = 2,
+               alpha    = 0.5) +
+  scale_colour_manual(values = res_tax$palette) +
+  theme_bw() +
+  labs(title    = paste("NMDS:", "TBD"),
+       subtitle = paste("Stress =", round(val_tax$nmds_stress, 3)))
+p_nmds_tax
+```
+
+## Affiliation maps
+
+```{r plot-affiliation}
+##============================================================================##
+## plot_affiliation() ----
+##============================================================================##
+shape_aff_phylo <- res_phylo$bioregion_sf %>%
+  dplyr::left_join(
+    tibble::rownames_to_column(as.data.frame(afi_phylo), "Island"),
+    by = "Island"
+  )
+aff_col <- grep("affili|afilli", names(shape_aff_phylo), value = TRUE)[1]
+
+p_aff_phylo <- plot_affiliation(shape_aff_phylo, aff_col)
+p_aff_phylo
+
+shape_aff_tax <- res_tax$bioregion_sf %>%
+  dplyr::left_join(
+    tibble::rownames_to_column(as.data.frame(afi_tax), "Island"),
+    by = "Island"
+  )
+p_aff_tax <- plot_affiliation(shape_aff_tax, aff_col)
+p_aff_tax
+##============================================================================##
+```
+
+# Comparing bioregionalisations
+
+## Build all bioregionalisations
+
+```{r build-all-bio, eval = T}
+##============================================================================##
+## Build all 12 bioregionalisations ----
+##============================================================================##
+bio <- list(
+  tax_sim = build_bioregion(tax_sim,   aegean_islands),
+  phy_sim = build_bioregion(phylo_sim, aegean_islands)
+)
+##============================================================================##
+```
+
+## Quick diagnostic table
+
+```{r diag-table, eval = T}
+##============================================================================##
+## Quick diagnostic table ----
+##============================================================================##
+diag_table <- tibble(
+  Combination = names(bio),
+  Optimal_k   = map_int(bio, "optimal_k"),
+  r_coph      = map_dbl(bio, "r_coph"),
+  Mean_sil    = map_dbl(bio, "mean_sil")
+)
+
+diag_table
+```
+
+## Pairwise comparisons of interest
+
+```{r comparisons-tibble, eval = T}
+##============================================================================##
+## Define all pairwise comparisons of interest ----
+##============================================================================##
+comparisons <- tribble(
+  ~name1,        ~name2,    ~comparison_type,
+  "phylo_sim",   "tax_sim", "Turnover: Phylo vs Tax"
+)
+##============================================================================##
+```
+
+## V-measure
+
+We will also evaluate the degree of spatial association between the resulting bioregionalization schema using: 
+- the V-measure index [@nowosad_spatial_2018], which evaluates the balance between homogeneity and completeness in categorical partitions and 
+- local relative inhomogeneity [@nowosad_spatial_2018], using the `vmeasure_calc`  function from the `sabre` 0.4.3 R package [@nowosad_spatial_2018]. 
+
+
+```{r vmeasure, eval = T}
+##============================================================================##
+## Run V-measure for every comparison ----
+##============================================================================##
+vmeasure_results <- vmeasure_calc(
+  x      = bio$tax_sim$sf,
+  y      = bio$phy_sim$sf,
+  x_name = group,
+  y_name = group
+) 
+
+sabre_metrics <- tibble(V_measure       = vmeasure_results$v_measure,
+                        Homogeneity     = vmeasure_results$homogeneity,
+                        Completeness    = vmeasure_results$completeness,
+                        comparison_type = 'TBD vs PBD')
+
+sabre_metrics
+```
+
+## Spatial inhomogeneity (rih) maps
+
+```{r rih-maps, eval = T}
+##============================================================================##
+## Visualise the spatial inhomogeneity (rih) maps for key comparisons ----
+##============================================================================##
+p_rih1 <- ggplot(vmeasure_results$map1) +
+  geom_sf(aes(fill = rih), colour = "grey40", linewidth = 0.2) +
+  scale_fill_gradientn(colors = mex.brewer("Revolucion", direction = 1),
+                       name   = "rih",
+                       limits = c(0, max(vmeasure_results$map1$rih, na.rm = TRUE))) +
+  labs(title = "Phylo Endemic turnover (local inhomogeneity)") +
+  theme_minimal()
+
+p_rih2 <- ggplot(vmeasure_results$map2) +
+  geom_sf(aes(fill = rih), colour = "grey40", linewidth = 0.2) +
+  scale_fill_gradientn(colors = mex.brewer("Revolucion", direction = 1),
+                       name   = "rih",
+                       limits = c(0, max(vmeasure_results$map2$rih, na.rm = TRUE))) +
+  labs(title = "Tax Endemic turnover (local inhomogeneity)") +
+  theme_minimal()
+
+p_rih1 
+
+p_rih2
+
+## Save it to disk if you'd like
+# ggsave("results/RIH.png", 
+#        p_rih1 / p_rih2,
+#        width  = 260,
+#        height = 220, 
+#        units  = "mm")
+```
+
+## Bar chart of V-measure scores
+
+```{r vmeasure-barplot, eval = T}
+##============================================================================##
+## Bar chart of all V-measure scores ----
+##============================================================================##
+p_bars <- sabre_metrics %>%
+  pivot_longer(cols      = c(V_measure, Homogeneity, Completeness),
+               names_to  = "Metric", 
+               values_to = "Value") %>%
+  arrange(desc(Value)) %>% 
+  ggplot(aes(x    = comparison_type,
+             y    = Value, 
+             fill = Metric)) +
+  geom_col(position = position_dodge(width = 0.7), 
+           width    = 0.6) +
+  coord_flip() +
+  scale_fill_met_d('Tsimshian') +
+  labs(x = NULL,
+       y = "Score") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom")
+
+p_bars
+
+## Save it to disk if you'd like
+# ggsave("results/Vmeasure_barplot.png", 
+#        p_bars,
+#        width = 260, 
+#        height = 220, 
+#        units = "mm",
+#        device = cairo_pdf)
+```
+
+## Save outputs
+
+```{r save-comparisons}
+##============================================================================##
+## Save everything ----
+##============================================================================##
+saveRDS(bio,            'RDS/Bioregionalisations.rds')
+saveRDS(sabre_metrics,  'RDS/Comparison_table.rds')
+##============================================================================##
+```
+
+## Null model testing
+
+We will also test whether the spatial concordance between bioregionalization schemes was higher than expected by chance, by implementing an area-weighted spatial null model. 
+
+For each pair of partitions A and B (i.e., the analogous taxonomic versus phylogenetic comparisons), we will first compute the observed area-weighted V-measure (V_obs) with the `vmeasure_calc` function of the `sabre` 0.4.3 R package (Nowosad and Stepinski 2018). 
+
+To build the null distribution efficiently, the spatial intersection between the polygons of partitions A and B will be pre-computed once and the resulting piecewise areas stored as fixed weights; the cluster labels of partition B will be then permuted at random across the Aegean islands 999 times, while the polygon geometry of both partitions will be held constant. 
+
+For each permutation, an area-weighted contingency table will be reconstructed from the fixed spatial-intersection weights and the permuted labels, and the V-measure will be recomputed by the same internal routine used for the observed value. 
+
+This design preserves the spatial structure (polygon shapes, areas, and tessellation of the study region) while randomising only the categorical assignment of regions to clusters, isolating the contribution of label congruence from the contribution of polygon geometry to the observed concordance. 
+
+```{r null-model, eval = T}
+##============================================================================##
+## Null model testing ----
+##============================================================================##
+set.seed(42)
+null_test <- run_null_vmeasure(
+  sf_A           = bio$phy_sim$sf,
+  sf_B           = bio$tax_sim$sf,
+  x_name         = "group",
+  y_name         = "group",
+  n_permutations = 999,
+  n_cores        = 4
+)
+
+# View results
+null_test$Observed
+null_test$P_value
+null_test$SES
+
+# Plot
+plot_null_vmeasure(null_test)
+```
+
+# Generalized Dissimilarity Models
+
+GDM is used to investigate the relative influence of dispersal limitation/geographical isolation versus environmental filtering. 
+
+
+GDM requires three things: biological distances, geographic locations and environmental variables at every site.
+
+## GDM configuration
+
+```{r gdm-config, eval = T}
+##============================================================================##
+## GDM configuration ----
+##============================================================================##
+
+## Matrix we will analyse in this teaching version
+m   <- "tax_sim"   # name of the distance object
+lab <- "TBD"       # human-readable label
+
+## Output directory (created if it does not exist)
+out_dir <- "RDS/GDM_Results"
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+## Permutation / cross-validation parameters
+n_perm     <- 9       # permutations in gdm.varImp_v2 (use 999 for publications)
+n_cores    <- 20      # CPU cores for parallel permutation testing
+cv_train   <- 0.70    # training fraction in cross-validation
+cv_n_tests <- 1000    # number of CV iterations
+alpha      <- 0.05    # significance threshold for predictor selection
+
+## Readable axis labels for spline plots
+pred_axis_labels <- c(
+  Geographic = "Geographical distance",
+  nitrogen   = "Nitrogen",
+  WP_sl5     = "WP",
+  slope      = "Slope",
+  forests    = "Forest (Eucl. dist.)",
+  hli        = "HLI"
+)
+
+## Colour palette (used in the I-spline plot at the end)
+matrix_colours <- c("PBD" = "#2c3e50",
+                    "TBD" = "#e74c3c")
+##============================================================================##
+```
+
+## Collinearity filtering
+
+We will filter our initial set of 63 abiotic predictors to prevent collinearity and model overfitting. To this end, we will use the function `collinear` from the `collinear` 3.0.0 R package [@benito_collinear_2023]. We will centre and scale all variables prior to modelling and remove any variables exhibiting zero and near zero variance using the `preProcess` function from the `caret` 7.0.1 R package [@kuhn_building_2008], as well as the variables with pairwise Spearman rank correlations and variance inflation factors equal to or above 0.7 and 2.5, respectively [@dormann_correlation_2012].
+
+
+```{r collinearity-filter, eval = T}
+##============================================================================##
+## Collinearity filtering ----
+##============================================================================##
+env_data <- exact_lulc %>% 
+  st_drop_geometry()
+
+env_cols <- setdiff(names(env_data), "Island")
+
+# A) Remove variables with zero variance (values that are the same everywhere)
+env_preprocessed <- env_data %>%
+  select(all_of(env_cols)) %>%
+  as.data.frame() %>%
+  {\(df) predict(preProcess(df, method = c("zv", "nzv", "corr")), df)}()
+
+# B) Variance Inflation Factor (VIF) filtering
+uncorr_env <- collinear(
+  df      = env_preprocessed,
+  max_cor = 0.7,    # drop pairs with |r| > 0.7
+  max_vif = 2.5     # drop variables with VIF > 2.5
+)$result$df %>%
+  mutate(Island = env_data$Island) %>%
+  select(Island, everything()) %>%
+  as_tibble()
+##============================================================================##
+```
+
+## Build `envTab`
+
+```{r envtab, eval = T}
+##============================================================================##
+## Create envTab (the predictor table required by formatsitepair) ----
+##============================================================================##
+centroids <- st_coordinates(st_centroid(aegean_islands))
+
+envTab <- uncorr_env %>%
+  mutate(lon = centroids[, 1],
+         lat = centroids[, 2]) %>%
+  select(Island, lon, lat, everything()) %>%
+  as.data.frame()
+
+## Save it to disk
+# saveRDS(envTab, "RDS/envTab for GDM.rds")
+
+## Numeric Site IDs replace Island names (formatsitepair requirement)
+envTab_site <- envTab %>%
+  mutate(Site = row_number()) %>%
+  select(-Island) %>%
+  select(Site, lon, lat, everything())
+##============================================================================##
+```
+
+## Convert distance to `sppTab`
+
+```{r spptab, eval = T}
+##============================================================================##
+## Convert the dist object to a sppTab ----
+##============================================================================##
+sppTab <- make_sppTab(tax_sim)
+sppTab[1:5, 1:5]
+```
+
+## Build the site-pair table
+
+```{r sitepair, eval = T}
+##============================================================================##
+## Build the site-pair table ----
+##============================================================================##
+gdmTab <- formatsitepair(
+  bioData     = sppTab,
+  bioFormat   = 3,
+  siteColumn  = "Site",
+  XColumn     = "lon",
+  YColumn     = "lat",
+  predData    = envTab_site,
+  sampleSites = 1
+)
+
+## Save it to disk
+# saveRDS(gdmTab, 
+#         file.path(out_dir, 
+#                   paste0("gdmTab_full_", 
+#                          lab,
+#                          ".rds")))
+
+head(gdmTab)
+```
+
+## Fit the full GDM
+
+In the GDM framework, a group of curvilinear monotonic functions is used to regress species turnover along environmental gradients, consequently identifying the nonlinear relationship between ecological and environmental dissimilarity [@fitzpatrick_environmental_2013]. 
+
+Given the finite sample size typical of island-like macroecological systems, full models containing all uncorrelated predictors are prone to severe variance dilution and overfitting. 
+
+To address this, we will apply a strict backward elimination procedure via matrix permutations (n=999) following best practices [Mokany et al. 2022](https://onlinelibrary.wiley.com/doi/full/10.1111/geb.13459). 
+
+Predictors lacking statistical significance (p>0.05) will be sequentially removed using a modified version of the function `gdm.varImp` from the `gdm` R package, and the final parsimonious models will be evaluated using the Akaike Information Criterion (AIC) using the function `AICFxn` provided by Mokany et al. (2022).
+
+```{r gdm-full, eval = T}
+##============================================================================##
+## Fit the full GDM ----
+##============================================================================##
+gdm_full <- gdm(gdmTab, 
+                geo     = TRUE,
+                splines = NULL,
+                knots   = NULL)
+
+## Save it to disk
+# saveRDS(gdm_full, 
+#         file.path(out_dir, 
+#                   paste0("gdmModel_full_",
+#                          lab,
+#                          ".rds")))
+
+# summary(gdm_full)
+str(gdm_full)
+```
+
+## AIC of the full model
+
+```{r aic-full, eval = T}
+##============================================================================##
+## AIC of the full model ----
+##============================================================================##
+aic_full <- AICFxn(gdm_full)
+
+## Save it to disk
+# saveRDS(aic_full, 
+#         file.path(out_dir,
+#                   paste0("AIC_full_",
+#                          lab,
+#                          ".rds")))
+
+full_aic_df <- tibble(
+  Matrix             = lab,
+  AIC                = as.numeric(aic_full[[1]]),
+  Deviance_Explained = aic_full[[2]]
+)
+
+full_aic_df
+```
+
+## Variable importance & permutation testing
+
+```{r varimp}
+##============================================================================##
+## Variable importance + permutation testing ----
+##============================================================================##
+vi <- gdm.varImp_v2(
+  gdmTab,
+  geo        = TRUE,
+  nPerm      = n_perm,
+  parallel   = TRUE,
+  cores      = n_cores,
+  predSelect = TRUE
+)
+
+saveRDS(vi, 
+        file.path(out_dir, 
+                  paste0("varImp_",
+                         lab,
+                         ".rds")))
+
+vi_summary  <- summarise_varImp(vi, lab)
+vi_model_df <- vi_summary$model
+vi_pred_df  <- vi_summary$predictors
+
+vi_model_df
+vi_pred_df
+```
+
+
+```{r load-slow-gdm, include = FALSE, cache = TRUE, eval = T}
+vi <- readRDS("RDS/GDM_Results/varImp_TBD.rds")
+```
+
+
+## Refit using significant predictors
+
+```{r gdm-final, eval = T}
+##============================================================================##
+## Refit using ONLY significant predictors ----
+##============================================================================##
+sig <- get_sig_preds(vi, alpha)
+
+cat("  -> Significant predictors:", paste(sig$all, collapse = ", "), "\n")
+
+if (length(sig$env) > 0) {
+  envTab_final <- envTab_site %>%
+    select(Site, lon, lat, all_of(sig$env))
+} else {
+  envTab_final <- envTab_site %>%
+    select(Site, lon, lat)
+}
+
+gdmTab_final <- formatsitepair(
+  bioData     = sppTab,
+  bioFormat   = 3,
+  siteColumn  = "Site",
+  XColumn     = "lon",
+  YColumn     = "lat",
+  predData    = envTab_final,
+  sampleSites = 1
+)
+
+gdm_final <- gdm(gdmTab_final, 
+                 geo     = sig$geo, 
+                 splines = NULL,
+                 knots   = NULL)
+
+
+## Save them to disk
+# saveRDS(gdm_final,
+#         file.path(out_dir, 
+#                   paste0("gdmModel_final_",
+#                          lab,
+#                          ".rds")))
+
+# saveRDS(gdmTab_final,
+#         file.path(out_dir,
+#                   paste0("gdmTab_final_",
+#                          lab,
+#                          ".rds")))
+
+str(gdm_final)
+```
+
+## AIC of the final model
+
+```{r aic-final, eval = T}
+##============================================================================##
+## AIC of the final model ----
+##============================================================================##
+aic_fin <- AICFxn(gdm_final)
+
+final_aic_df <- tibble(
+  Matrix             = lab,
+  AIC                = as.numeric(aic_fin[[1]]),
+  Deviance_Explained = aic_fin[[2]],
+  Significant_Preds  = paste(sig$all, collapse = ", ")
+)
+final_aic_df
+
+full_aic_df
+```
+
+> Which model is better and why?
+
+## Cross-validation
+
+To assess the predictive accuracy of our Generalized Dissimilarity Models (GDMs), wewill  perform 1000 iterations of cross-validation. In each iteration, models were trained on a random 70% subset of the massifs and test against the remaining 30%. 
+
+Model performance will be evaluated using the mean deviance explained, the mean absolute error (MAE) and the Pearson correlation between observed and predicted dissimilarities. 
+
+
+```{r gdm-cv}
+##============================================================================##
+## Cross-validation of the final model ----
+##============================================================================##
+cat("  -> Cross-validation (", cv_n_tests, " tests) ...\n")
+
+cv <- gdm.crossvalidation(
+  gdmTab_final,
+  train.proportion   = cv_train,
+  n.crossvalid.tests = cv_n_tests,
+  geo                = sig$geo
+)
+
+
+## Save it to disk
+saveRDS(cv,
+        file.path(out_dir,
+                  paste0("cv_",
+                         lab,
+                         ".rds")))
+```
+
+```{r load-slow-gdmcv, include = FALSE, cache = TRUE, eval = T}
+cv <- readRDS("RDS/GDM_Results/cv_TBD.rds")
+```
+
+```{r gdm-cv2, eval = T}
+cv_scalar_df <- compile_cv(cv, lab)
+cv_scalar_df
+
+## Error.by.Observed.Value is a matrix; keep separately
+cv_error_df <- if (!is.null(cv$Error.by.Observed.Value)) {
+  as.data.frame(cv$Error.by.Observed.Value) %>%
+    mutate(Matrix = lab) %>%
+    select(Matrix, everything())
+} else {
+  NULL
+}
+##============================================================================##
+```
+
+## Extract I-splines
+
+
+We will extract for each of these variables the fitted I-spline (a curvilinear line expressing the relationship between species turnover and each predictor; each I-spline has three coefficients). 
+
+We will then plot the I-splines to investigate the magnitude and rate of beta diversity variation along the most significant predictor variables. 
+
+We will use the sum of the I-spline’s coefficients (Fitzpatrick et al. 2013) in order to quantify the magnitude of turnover along each gradient.
+
+```{r isplines-extract, eval = T}
+##============================================================================##
+## Extract I-splines from the final model ----
+##============================================================================##
+spl <- gdm::isplineExtract(gdm_final)
+
+## Save it to disk
+# saveRDS(spl,
+#         file.path(out_dir, 
+#                   paste0("splines_",
+#                          lab,
+#                          ".rds")))
+
+spline_long_df <- spline_to_long(spl, lab)
+
+head(spline_long_df)
+```
+
+## Save summary tables
+
+```{r summary-export}
+##============================================================================##
+## Save summary tables to one excel workbook ----
+##============================================================================##
+saveRDS(full_aic_df,  file.path(out_dir, "summary_full_model_AIC.rds"))
+saveRDS(final_aic_df, file.path(out_dir, "summary_final_model_AIC.rds"))
+saveRDS(cv_scalar_df, file.path(out_dir, "summary_cross_validation.rds"))
+
+wb <- createWorkbook()
+
+addWorksheet(wb, "Full_Model_AIC")
+writeData(   wb, "Full_Model_AIC", full_aic_df)
+
+addWorksheet(wb, "VarImp_Model_Summary")
+writeData(   wb, "VarImp_Model_Summary", vi_model_df)
+
+addWorksheet(wb, "VarImp_Predictor_Detail")
+writeData(   wb, "VarImp_Predictor_Detail", vi_pred_df)
+
+addWorksheet(wb, "Final_Model_AIC")
+writeData(   wb, "Final_Model_AIC", final_aic_df)
+
+addWorksheet(wb, "Cross_Validation")
+writeData(   wb, "Cross_Validation", cv_scalar_df)
+
+if (!is.null(cv_error_df)) {
+  addWorksheet(wb, "CV_Error_by_Obs_Value")
+  writeData(   wb, "CV_Error_by_Obs_Value", cv_error_df)
+}
+
+saveWorkbook(
+  wb,
+  file      = file.path(out_dir, "GDM_Summary_Results.xlsx"),
+  overwrite = TRUE
+)
+
+cat("\nAll summaries saved to:",
+    file.path(out_dir, "GDM_Summary_Results.xlsx"), "\n")
+##============================================================================##
+```
+
+## I-spline plots
+
+```{r isplines-plot, eval = T}
+##============================================================================##
+## I-spline plots ----
+##============================================================================##
+all_splines <- spline_long_df
+
+## Save them to disk
+# saveRDS(all_splines, 
+#         file.path(out_dir,
+#                   "all_spline_data_long.rds"))
+
+# write.xlsx(all_splines, 
+#            file.path(out_dir, 
+#                      "all_spline_data_long.xlsx"))
+
+## Shared theme for every panel
+spline_base_theme <- theme_minimal() +
+  theme(text = element_text(family = "Times New Roman",
+                            face   = "bold",
+                            size   = 12),
+        legend.position = "none")
+
+unique_preds <- unique(all_splines$Predictor)
+
+spline_plots <- purrr::map(unique_preds, function(p) {
+  
+  df      <- dplyr::filter(all_splines, Predictor == p)
+  x_label <- if (p %in% names(pred_axis_labels)) pred_axis_labels[[p]] else p
+  
+  ggplot(df, aes(x      = x_value, 
+                 y      = y_value,
+                 colour = Matrix)) +
+    geom_line(linewidth = 1) +
+    scale_color_manual(values = matrix_colours, 
+                       name   = "Metric") +
+    labs(x = x_label,
+         y = "Partial ecological distance") +
+    spline_base_theme
+})
+
+## Show legend only on the last panel
+spline_plots[[length(spline_plots)]] <-
+  spline_plots[[length(spline_plots)]] +
+  theme(
+    legend.position   = "bottom",
+    legend.direction  = "horizontal",
+    legend.background = element_rect(colour    = "white",
+                                     fill      = "white",
+                                     linewidth = 0.5,
+                                     linetype  = "solid")
+  )
+
+## Arrange all panels into a 2-column grid and export as TIFF (300+ dpi)
+n_cols <- 2
+n_rows <- ceiling(length(spline_plots) / n_cols)
+
+spline_plots
+
+
+combined_grob <- do.call(arrangeGrob,
+                         c(spline_plots, ncol = n_cols))
+
+## Save them to disk
+# ggsave(
+#   filename = file.path(out_dir, "Partial_Ecological_Distance_ISplines.tif"),
+#   plot     = combined_grob,
+#   device   = "tiff",
+#   width    = 40,
+#   height   = 15 * n_rows,
+#   units    = "cm",
+#   dpi      = 600,
+#   bg       = "white"
+# )
+```
+
+
+# Your turn
+
+Now try and run the analyses for the PBD matrix and check if the islands are clustering a tad differently.
+
+# **References**  
