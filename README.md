@@ -11,7 +11,8 @@ A 2-day standalong workshop developed for the postgraduate students enrolled in 
 
 > A two-day reproducible methodological seminar delivered at the **Department of Biology, University of Patras (2026)**, covering spatial data retrieval, cleaning, biodiversity analysis and species distribution modelling in R, with a Mediterranean focus.
 
-🌐 **Live slides:** <https://kkougiou.github.io/Botany_Upatras_2026/>  
+🌐 **Live slides:**
+Day 2: <https://kkougiou.github.io/Botany_Upatras_2026/Biogeography.html/>  
 📄 **DOI:** <https://doi.org/10.5281/zenodo.20369680>  
 ✉️ **Contact:** kkougiou@aua.gr  
 
