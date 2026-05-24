@@ -42,7 +42,7 @@ cd Botany_Upatras_2026
 ```
 
 ### Option B — Browse only
-Just visit the [landing page](https://kkougiou.github.io/Botany_Upatras_2026/).
+Just visit the [landing page](https://kkougiou.github.io/Botany_Upatras_2026).
 
 ### Option C — Run in the cloud
 [Open in GitHub Codespaces](https://codespaces.new/kkougiou/Botany_Upatras_2026)
