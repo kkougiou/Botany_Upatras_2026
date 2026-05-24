@@ -1,0 +1,8 @@
+---
+title: "Botany Upatras 2026 - Workshop Materials"
+---
+
+Welcome to the 2-day seminar on Spatial Data Retrieval and Biodiversity Patterns!
+
+* [Day 1: Spatial data retrieval, cleaning, harmonisation](day1-spatial-data.html)
+* [Day 2: Biodiversity metrics, β-diversity, SDMs](Biogeography.html)
