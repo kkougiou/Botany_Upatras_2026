@@ -1760,3 +1760,1568 @@ spline_to_long <- function(spl, label) {
 
 
 
+##============================================================================##
+## Load the libraries -----------
+##============================================================================##
+library(ggOceanMaps)
+library(marmap)
+library(ggspatial)
+library(ggplot2)
+library(ggnewscale)
+library(RColorBrewer)
+library(ggtext)
+library(rcartocolor)
+library(pals)
+library(tidyterra)
+library(tidyverse)
+library(MetBrewer)
+library(MoMAColors)
+library(terra)
+library(sf)
+library(dplyr)
+library(magrittr)
+library(elevatr)
+library(giscoR)
+library(rmapshaper)
+library(extrafont)
+
+loadfonts(device = 'win')
+##============================================================================##
+
+
+##============================================================================##
+## Set up the theme -----
+##============================================================================##
+## general theme
+theme_set(theme_classic(base_family = "Palatino Linotype"))
+
+theme_update(
+  axis.text.x = element_text(color = "black", 
+                             face = "bold", 
+                             size = 20, ## it was 13 
+                             margin = margin(t = 6)),
+  axis.text.y = element_text(color = "black", 
+                             size = 20, ## it was 12 
+                             hjust = 1, 
+                             margin = margin(r = 6),
+                             family = "Palatino Linotype"),
+  axis.line.x = element_line(color = "black", 
+                             linewidth = 1),
+  panel.grid.major.y = element_line(color = "grey90", 
+                                    linewidth = .6),
+  plot.background = element_rect(fill = "white",
+                                 color = "white"),
+  plot.margin = margin(rep(20, 4)),
+  strip.text.x = element_text(size = 25,
+                              face = "bold")
+)
+
+
+## theme for horizontal charts
+theme_flip <-
+  theme(
+    axis.text.x = element_text(face = "plain", 
+                               family = "Palatino Linotype",
+                               size = 28), ## It was 15
+    axis.text.y = element_text(face = "bold", 
+                               family = "Palatino Linotype",
+                               size = 28), ## It was 15
+    panel.grid.major.x = element_line(color = "grey90", 
+                                      linewidth = .6),
+    panel.grid.major.y = element_blank(),
+    legend.position = "top", 
+    legend.text = element_text(family = "Palatino Linotype", 
+                               size = 22), ## It was 12
+    legend.title = element_text(face = "bold",
+                                size = 22, ## It was 12
+                                margin = margin(b = 25))
+  )
+##============================================================================##
+
+
+##============================================================================##
+## Load Greece -----------
+##============================================================================##
+Greece <- geodata::gadm('GRC', path = getwd(), level = 0)
+##============================================================================##
+
+
+##============================================================================##
+## Color function ----
+##============================================================================##
+col2alpha <- function(col, alpha) {
+  col_rgb <- col2rgb(col)/255
+  rgb(col_rgb[1], col_rgb[2], col_rgb[3],
+      alpha = alpha)
+}
+##============================================================================##
+
+
+##============================================================================##
+## Load spatial data for the biodiversity figures ----
+##============================================================================##
+Greece <- geodata::gadm(country = 'GRC', level = 0, path = getwd())
+Turkey <- geodata::gadm(country = 'TUR', path = getwd(), level = 0)
+Albania <- geodata::gadm(country = 'ALB', level = 0, path = getwd())
+Fyrom <- geodata::gadm(country = 'MKD', level = 0, path = getwd())
+Bulgaria <- geodata::gadm(country = 'BGR', level = 0, path = getwd())
+Serbia <- geodata::gadm(country = 'SRB', level = 0, path = getwd())
+Montenegro <- geodata::gadm(country = 'MNE', level = 0, path = getwd())
+Kosovo <- geodata::gadm(country = 'XKO', level = 0, path = getwd())
+Italy <- geodata::gadm(country = 'ITA', level = 0, path = getwd())
+##============================================================================##
+
+
+##============================================================================##
+## Load spatial data for the biodiversity figures ----
+##============================================================================##
+study_area <- read_sf("Shapefiles/Aegean Islands.shp")
+
+study_area_d <- st_buffer(study_area, 20000)
+
+Greece_d <- terra::crop(Greece, study_area_d %>% vect, ext = T)
+##============================================================================##
+
+
+##============================================================================##
+## Load  and crop the elevation data ----
+##============================================================================##
+# altitude <- get_elev_raster(locations = Greece_d %>% 
+#                               st_as_sf(),
+#                             z = 9,
+#                             neg_to_na = TRUE) %>%
+#   as.data.frame(., xy = TRUE) %>%
+#   rast() %>%
+#   crop(., Greece_d,
+#        mask = T,
+#        snap = 'in')
+# 
+# altitude[altitude < 0] <- 0
+# 
+# writeRaster(altitude, 'RDS/Altitude for visualisation study area lower resolution.tif')
+
+altitude <- rast('RDS/Altitude for visualisation study area lower resolution.tif')
+
+
+# slope <- terrain(altitude, "slope", unit = "radians")
+# aspect <- terrain(altitude, "aspect", unit = "radians")
+# hill <- shade(slope, aspect, 30, 270) %>%
+#   as.data.frame(xy = T) %>%
+#   drop_na() %>%
+#   rast()
+# 
+# names(hill) <- "shades"
+# 
+# saveRDS(hill, 'RDS/Hill from altitude for plotting higher resolution.rds')
+
+hill <- readRDS('RDS/Hill from altitude for plotting higher resolution.rds')
+
+pal_greys <- hcl.colors(1000, "Grays")
+# 
+# index <- hill %>%
+#   mutate(index_col = scales::rescale(shades,
+#                                      to = c(1,
+#                                             length(pal_greys)))) %>%
+#   mutate(index_col = round(index_col)) %>%
+#   pull(index_col) %>%
+#   na.omit()
+# 
+# saveRDS(index, 'RDS/hill index for visualisation Altitude higher resolution.rds')
+
+index <- readRDS('RDS/hill index for visualisation Altitude higher resolution.rds')
+##============================================================================##
+
+
+##============================================================================##
+## Get cols for hillshade plotting ----
+##============================================================================##
+vector_cols <- pal_greys[index]
+##============================================================================##
+
+
+##============================================================================##
+## Get bathymetry data -----
+##============================================================================##
+# bathymetric_data <- marmap::getNOAA.bathy(lon1 = st_bbox(Greece_d)["xmin"],
+#                                           lon2 = st_bbox(Greece_d)["xmax"],
+#                                           lat1 = st_bbox(Greece_d)["ymin"],
+#                                           lat2 = st_bbox(Greece_d)["ymax"],
+#                                           resolution = res(altitude)[1],
+#                                           keep = TRUE) %>%
+#   fortify.bathy()
+# 
+# bathymetric_data_z <- bathymetric_data %>%
+#   rast() %>%
+#   tidyterra::mutate(z = ifelse(z > 0, NA, z)) %>%
+#   as_tibble(xy = T) %>%
+#   drop_na()
+# 
+# saveRDS(bathymetric_data_z, 'RDS/Bathymetric data for plotting.rds')
+
+bathymetric_data_z <- readRDS('RDS/Bathymetric data for plotting.rds')
+##============================================================================##
+
+
+##============================================================================##
+## Figure main plots -----
+##============================================================================##
+fig_main_plots <- ggplot() + 
+  
+  theme(panel.grid.major = element_line(color = gray(0.5), 
+                                        linetype = "blank", 
+                                        size = 0.5), 
+        
+        panel.background = element_rect(fill = col2alpha('steelblue', 0.15)),
+        
+        axis.title = element_blank(), 
+        
+        legend.position = "bottom", 
+        
+        legend.key.width = unit(4.5, "cm"), ## was 4.5
+        
+        legend.key = element_rect(fill = 'black',
+                                  colour = "black"),
+        
+        legend.title.align = 0.5,
+        
+        legend.text = element_text(size = 28), # Increase legend text size
+        legend.title = element_text(size = 30), # Increase legend title size
+        legend.key.size = unit(1.5, "cm"),
+        
+        text = element_text(family = "Palatino Linotype", 
+                            face = "bold", 
+                            size = 14),
+        
+        # axis.text = element_text(size = 28),
+        
+        panel.border = element_rect(colour = 'black', ## it was 'black'
+                                    fill = NA, 
+                                    size = 1.2)) + 
+  
+  geom_raster(data = bathymetric_data_z,
+              aes(x = x,
+                  y = y, 
+                  fill = z)) +
+  
+  scale_fill_hypso_tint_c(
+    palette = "colombia",
+    na.value = "#001E50",
+    guide = "none"
+  ) +
+  
+  ggnewscale::new_scale_fill()+
+  
+  geom_spatvector(data = Greece, color = 'black', fill = 'grey85') +
+  
+  geom_spatvector(data = Albania, color = 'black', fill = 'grey85') +
+  
+  geom_spatvector(data = Fyrom, color = 'black', fill = 'grey85') +
+  
+  geom_spatvector(data = Bulgaria, color = 'black', fill = 'grey85') +
+  
+  geom_spatvector(data = Turkey, color = 'black', fill = 'grey85') +
+  
+  geom_spatvector(data = Montenegro, color = 'black', fill = 'grey85') +
+  
+  geom_spatvector(data = Kosovo, color = 'black', fill = 'grey85') + 
+  
+  geom_spatvector(data = Greece, 
+                  color = 'black',
+                  fill = NA) + 
+  
+  
+  coord_sf(xlim = c(st_bbox(Greece_d)[1],
+                    st_bbox(Greece_d)[3]),
+           ylim = c(st_bbox(Greece_d)[2],
+                    st_bbox(Greece_d)[4]),
+           expand = FALSE,
+           label_axes = list()) + 
+  
+  annotate("text", 
+           x = 28, 
+           y = 38.5, 
+           label = "bold (Turkey)", 
+           family = 'Palatino Linotype', 
+           size = 8,
+           parse = T) + 
+  
+  annotate("text", 
+           x = 20.2, 
+           y = 40.5, 
+           label = "bold (Albania)", 
+           family = 'Palatino Linotype', 
+           size = 8, 
+           parse = T)  + 
+  
+  annotate("text", 
+           x = 22, 
+           y = 41.55, 
+           label = "North Macedonia",
+           family = 'Palatino Linotype', 
+           size = 8,
+           fontface = 'bold')  + 
+  
+  annotate("text",
+           x = 25, 
+           y = 41.6, 
+           label = "bold (Bulgaria)", 
+           family = 'Palatino Linotype', 
+           size = 8,
+           parse = T) + 
+  
+  annotate("text", 
+           x = 19.875, 
+           y = 37.3, 
+           label = "Ionian Sea",
+           family = 'Palatino Linotype',
+           color = 'grey25', 
+           size = 7.5, 
+           fontface = 'bold') + 
+  
+  annotate("text",
+           x = 25, 
+           y = 38.35, 
+           label = "Aegean Sea", 
+           family = 'Palatino Linotype',
+           color = 'grey25',
+           size = 7.5, 
+           fontface = 'bold')  
+##============================================================================##
+
+
+##============================================================================##
+## Function to create the ector maps ----
+##============================================================================##
+create_vector_map <- function(vector_layer,
+                              fill_column,
+                              legend_name = "Value",
+                              base_plot = fig_main_plots,
+                              color_palette = NULL,
+                              alpha_value = 0.7,
+                              digits = 1,
+                              fill_type = "continuous",
+                              border_color = "black",
+                              border_width = 0.3,
+                              output_path = NULL,
+                              width = 60,
+                              height = 60) {
+  
+  # ── Handle input: accept both sf and SpatVector ──
+  if (inherits(vector_layer, "sf")) {
+    spat_layer <- terra::vect(vector_layer)
+  } else if (inherits(vector_layer, "SpatVector")) {
+    spat_layer <- vector_layer
+  } else {
+    stop("vector_layer must be an sf or SpatVector object.")
+  }
+  
+  # ── Discrete: coerce to factor so ggplot uses a discrete scale ──
+  if (fill_type == "discrete") {
+    df_tmp <- as.data.frame(spat_layer)
+    df_tmp[[fill_column]] <- as.factor(df_tmp[[fill_column]])
+    terra::values(spat_layer) <- df_tmp
+    
+    n_levels <- nlevels(df_tmp[[fill_column]])
+    
+    # Auto-generate palette if none supplied
+    if (is.null(color_palette)) {
+      color_palette <- hcl.colors(n_levels, palette = "Dynamic")
+    }
+    
+    # If user passed an unnamed vector, assign level names
+    if (is.null(names(color_palette))) {
+      lvls <- levels(df_tmp[[fill_column]])
+      color_palette <- setNames(
+        rep_len(color_palette, n_levels),
+        lvls
+      )
+    }
+  }
+  
+  # ── Continuous: compute range and midpoint ──
+  if (fill_type == "continuous") {
+    values <- as.numeric(as.data.frame(spat_layer)[[fill_column]])
+    value_range <- range(values, na.rm = TRUE)
+    midpoint <- mean(value_range)
+    
+    if (is.null(color_palette)) {
+      color_palette <- viridis::viridis(100)
+    }
+  }
+  
+  # ── Build map ──
+  vector_plot <- base_plot +
+    
+    # Hillshade
+    geom_spatraster(
+      data = hill,
+      aes(fill = shades),
+      maxcell = Inf
+    ) +
+    scale_fill_gradientn(
+      colors = pal_greys,
+      na.value = NA,
+      guide = "none"
+    ) +
+    
+    new_scale_fill() +
+    
+    # Main vector layer
+    geom_spatvector(
+      data = spat_layer,
+      aes(fill = .data[[fill_column]]),
+      color = border_color,
+      linewidth = border_width,
+      alpha = alpha_value
+    )
+  
+  # ── Scale: continuous vs discrete ──
+  if (fill_type == "continuous") {
+    
+    vector_plot <- vector_plot +
+      scale_fill_gradientn(
+        name = legend_name,
+        colours = color_palette,
+        limits = value_range,
+        breaks = c(value_range[1], midpoint, value_range[2]),
+        labels = round(c(value_range[1], midpoint, value_range[2]), digits),
+        na.value = NA
+      ) +
+      guides(
+        fill = guide_colorbar(
+          title.position = "top",
+          title.hjust = 0.5,
+          direction = "horizontal",
+          frame.colour = "black",
+          frame.linewidth = 0.85
+        )
+      )
+    
+  } else if (fill_type == "discrete") {
+    
+    vector_plot <- vector_plot +
+      scale_fill_manual(
+        name = legend_name,
+        values = color_palette
+      ) +
+      guides(
+        fill = guide_legend(title.position = "top",
+                            title.hjust = 0.5,       
+                            nrow = 1,                 
+                            label.position = "bottom")
+      )
+    
+  }
+  
+  # ── Overlay layers and coord ──
+  vector_plot <- vector_plot +
+    
+    geom_spatvector(
+      data = study_area,
+      fill = "transparent",
+      color = "black",
+      linewidth = 0.5
+    ) +
+    geom_spatvector(
+      data = Greece,
+      color = "black",
+      fill = NA
+    ) +
+    
+    coord_sf(
+      xlim = ext(study_area)[1:2],
+      ylim = ext(study_area)[3:4],
+      expand = FALSE,
+      label_axes = list()
+    )
+  
+  # ── Save if requested ──
+  if (!is.null(output_path)) {
+    png(output_path,
+        units = "cm",
+        width = width,
+        height = height,
+        res = 300)
+    print(vector_plot)
+    dev.off()
+  }
+  
+  return(vector_plot)
+}
+##============================================================================##
+
+
+##============================================================================##
+## Load the libraries ----
+##============================================================================##
+library(ggalluvial)
+library(patchwork)
+library(tidyverse)
+library(cluster)
+library(sf)
+library(bioregion)       # Network clustering (Louvain, Greedy)
+library(adespatial)      # LCBD / SCBD
+library(betareg)         # Beta regression for proportional response
+library(zetadiv)         # Multi-site zeta diversity
+library(sabre)           # V-measure (network vs hierarchical comparison)
+library(betapart)        # Beta diversity components (already computed)
+library(maptree)
+library(MetBrewer)
+library(ggrepel)
+library(openxlsx)
+library(extrafont)
+library(mclust)          # adjustedRandIndex
+library(aricode)         # NMI, AMI, ARI (lightweight alternative)
+
+extrafont::loadfonts(device = "win", 
+                     quiet = TRUE)
+
+`%||%` <- function(x, y) if (is.null(x)) y else x
+##============================================================================##
+
+
+##============================================================================##
+## compare_partitions ----
+##============================================================================##
+compare_partitions <- function(sf_a,
+                               sf_b,
+                               name_a = "A", 
+                               name_b = "B") {
+  
+  ## Extract group labels for non-spatial metrics
+  labels_a <- sf_a$group
+  labels_b <- sf_b$group
+  
+  ## Drop NAs (unassigned mountains)
+  keep     <- !is.na(labels_a) & !is.na(labels_b)
+  labels_a <- labels_a[keep]
+  labels_b <- labels_b[keep]
+  
+  ## ── EARLY EXIT SAFETY CHECK ────────────────────────────────────
+  ## If there are no overlapping valid regions, return NAs to prevent crash
+  if (length(labels_a) == 0) {
+    warning(sprintf("No overlapping non-NA labels between %s and %s. Returning NAs.", name_a, name_b), call. = FALSE)
+    return(tibble(
+      Method_A     = name_a,
+      Method_B     = name_b,
+      ARI          = NA_real_,
+      NMI          = NA_real_,
+      AMI          = NA_real_,
+      Homogeneity  = NA_real_,
+      Completeness = NA_real_,
+      V_measure    = NA_real_,
+      # Cramers_V    = NA_real_,
+      # ChiSq_p      = NA_real_,
+      N_groups_A   = length(unique(sf_a$group[!is.na(sf_a$group)])),
+      N_groups_B   = length(unique(sf_b$group[!is.na(sf_b$group)]))
+    ))
+  }
+  ## ───────────────────────────────────────────────────────────────
+  
+  ct <- table(labels_a, labels_b)
+  n  <- sum(ct)
+  
+  ## ── Label-based metrics ────────────────────────────────────────
+  ari <- aricode::ARI(labels_a, labels_b)
+  nmi <- aricode::NMI(labels_a, labels_b, variant = "sum")
+  ami <- aricode::AMI(labels_a, labels_b)
+  
+  ## ── Spatial V-measure via sabre ────────────────────────────────
+  sf_a_clean <- sf_a[keep, ]
+  sf_b_clean <- sf_b[keep, ]
+  
+  vm <- tryCatch(
+    sabre::vmeasure_calc(x      = sf_a_clean,
+                         y      = sf_b_clean,
+                         x_name = group,
+                         y_name = group),
+    error = function(e) {
+      warning("vmeasure_calc failed: ", conditionMessage(e), call. = FALSE)
+      list(v_measure = NA_real_, homogeneity = NA_real_,
+           completeness = NA_real_)
+    }
+  )
+  
+  ## ── Cramér's V ─────────────────────────────────────────────────
+  chi <- suppressWarnings(chisq.test(ct, simulate.p.value = TRUE, B = 9999))
+  k   <- min(nrow(ct), ncol(ct))
+  
+  cramers_v <- if (k <= 1) 0 else sqrt(chi$statistic / (n * (k - 1)))
+  
+  tibble(
+    Method_A     = name_a,
+    Method_B     = name_b,
+    ARI          = round(ari, 3),
+    NMI          = round(nmi, 3),
+    AMI          = round(ami, 3),
+    Homogeneity  = round(vm$homogeneity, 3),
+    Completeness = round(vm$completeness, 3),
+    V_measure    = round(vm$v_measure, 3),
+    # Cramers_V    = round(as.numeric(cramers_v), 3),
+    # ChiSq_p      = round(chi$p.value, 4),
+    N_groups_A   = length(unique(labels_a)),
+    N_groups_B   = length(unique(labels_b))
+  )
+}
+##============================================================================##
+
+
+##============================================================================##
+## compare_all_methods ----
+##============================================================================##
+compare_all_methods <- function(config, dataset_label) {
+  methods <- names(config)[sapply(config, function(x) "sf" %in% names(x))]
+  pairs   <- combn(methods, 2, simplify = FALSE)
+  
+  map_dfr(pairs, function(p) {
+    compare_partitions(
+      sf_a   = config[[ p[1] ]]$sf,
+      sf_b   = config[[ p[2] ]]$sf,
+      name_a = p[1],
+      name_b = p[2]
+    ) %>%
+      mutate(Dataset = dataset_label, .before = 1)
+  })
+}
+##============================================================================##
+
+
+##============================================================================##
+## build_cluster_table ----
+##============================================================================##
+build_cluster_table <- function(net_results, 
+                                bio_list, 
+                                hclust_keys, 
+                                dataset_label) {
+  
+  net_rows <- map_dfr(names(net_results), function(m) {
+    sf_obj <- net_results[[m]]$sf
+    tibble(Dataset = dataset_label, Island = as.character(sf_obj$Island),
+           Method = m, Group = as.character(sf_obj$group)) %>%
+      distinct(Island, .keep_all = TRUE)
+  })
+  
+  hc_rows <- map_dfr(hclust_keys, function(hk) {
+    sf_obj <- bio_list[[hk]]$sf
+    tibble(Dataset = dataset_label, Island = as.character(sf_obj$Island),
+           Method = hk, Group = as.character(sf_obj$group)) %>%
+      distinct(Island, .keep_all = TRUE)
+  })
+  
+  bind_rows(net_rows, hc_rows)
+}
+##============================================================================##
+
+
+##============================================================================##
+## plot_bioregion_alluvial ----
+##============================================================================##
+plot_bioregion_alluvial <- function(cluster_tbl,
+                                    dataset_name   = NULL,
+                                    method_order   = NULL,
+                                    label_what     = c("group", "mountain", "none"),
+                                    palette        = NULL,
+                                    title          = NULL) {
+  
+  label_what <- match.arg(label_what)
+  
+  dat <- cluster_tbl
+  if (!is.null(dataset_name)) dat <- dplyr::filter(dat, Dataset == dataset_name)
+  
+  dat <- dat %>%
+    dplyr::distinct(Mountain, Method, Group) %>%
+    dplyr::filter(!is.na(Group))
+  
+  if (!is.null(method_order)) {
+    dat$Method <- factor(dat$Method, levels = method_order)
+  } else {
+    dat$Method <- factor(dat$Method, levels = unique(dat$Method))
+  }
+  dat$Group <- factor(dat$Group)
+  
+  # Dynamic palette sized to #clusters
+  n_g <- nlevels(dat$Group)
+  if (is.null(palette)) {
+    palette <- if (n_g <= 8)
+      RColorBrewer::brewer.pal(max(3, n_g), "Set2")[seq_len(n_g)]
+    else
+      viridisLite::viridis(n_g)
+  }
+  names(palette) <- levels(dat$Group)
+  
+  p <- ggplot(dat,
+              aes(x = Method, stratum = Group, alluvium = Mountain,
+                  fill = Group)) +
+    geom_flow(stat          = "alluvium",
+              lode.guidance = "frontback",
+              color         = "gray55",
+              alpha         = 0.65,
+              linewidth     = 0.3) +
+    geom_stratum(alpha = 0.9, color = "white", linewidth = 0.5) +
+    scale_fill_manual(values = palette, name = "Cluster") +
+    labs(
+      title    = title %||% paste("Bioregionalization flow:",
+                                  dataset_name %||% "all datasets"),
+      subtitle = "Each ribbon is a mountain; strata heights = cluster sizes",
+      x        = NULL,
+      y        = "Number of mountains"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x       = element_text(angle = 30, hjust = 1, face = "bold"),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor   = element_blank(),
+      plot.title        = element_text(face = "bold"),
+      plot.subtitle     = element_text(color = "gray40", size = 10),
+      legend.position   = "none"
+    )
+  
+  if (label_what == "group") {
+    p <- p + geom_text(stat = "stratum", aes(label = Group),
+                       size = 3.5, fontface = "bold", color = "white")
+  } else if (label_what == "mountain") {
+    p <- p + geom_text(stat = "alluvium", aes(label = Mountain),
+                       size = 2.7, color = "black")
+  }
+  
+  p
+}
+##============================================================================##
+
+
+##============================================================================##
+## compute_coassociation ----
+##============================================================================##
+compute_coassociation <- function(cluster_tbl, dataset_name = NULL) {
+  
+  dat <- cluster_tbl
+  if (!is.null(dataset_name)) dat <- dplyr::filter(dat, Dataset == dataset_name)
+  
+  dat <- dat %>%
+    dplyr::filter(!is.na(Group)) %>%
+    dplyr::distinct(Mountain, Method, Group)
+  
+  mountains <- sort(unique(dat$Mountain))
+  methods   <- unique(dat$Method)
+  n <- length(mountains)
+  
+  coassoc <- matrix(0, n, n, dimnames = list(mountains, mountains))
+  counts  <- matrix(0, n, n, dimnames = list(mountains, mountains))
+  
+  for (m in methods) {
+    sub     <- dat[dat$Method == m, ]
+    labs    <- setNames(sub$Group, sub$Mountain)
+    present <- intersect(mountains, names(labs))
+    labs    <- labs[present]
+    
+    same <- outer(labs, labs, "==")
+    coassoc[present, present] <- coassoc[present, present] + same
+    counts[present, present]  <- counts[present, present]  + 1
+  }
+  
+  C <- coassoc / counts
+  C[is.nan(C)] <- 0
+  diag(C) <- 1
+  
+  list(coassoc = C, n_methods = length(methods), methods = methods)
+}
+##============================================================================##
+
+
+##============================================================================##
+## consensus_partition ----
+##============================================================================##
+consensus_partition <- function(coassoc_result,
+                                k,                         # now required
+                                link_method = "average") {
+  
+  stopifnot(is.numeric(k), length(k) == 1, k >= 2)
+  
+  C  <- coassoc_result$coassoc
+  d  <- as.dist(1 - C)
+  hc <- hclust(d, method = link_method)
+  
+  clusters <- cutree(hc, k = k)
+  r_coph   <- cor(cophenetic(hc), d)
+  
+  message("Consensus built with k = ", k,
+          " (cophenetic r = ", round(r_coph, 3), ")")
+  
+  list(
+    clusters     = clusters,
+    k            = k,
+    hclust       = hc,
+    coassoc      = C,
+    link_method  = link_method,
+    cophenetic_r = r_coph
+  )
+}
+##============================================================================##
+
+
+##============================================================================##
+## compute_mountain_stability ----
+##============================================================================##
+compute_mountain_stability <- function(coassoc_result, consensus_result) {
+  
+  C  <- coassoc_result$coassoc
+  cl <- consensus_result$clusters
+  
+  stability <- vapply(names(cl), function(m) {
+    partners <- names(cl)[cl == cl[m] & names(cl) != m]
+    if (!length(partners)) return(1)
+    mean(C[m, partners])
+  }, numeric(1))
+  
+  disagreement <- vapply(names(cl), function(m) {
+    others <- names(cl)[cl != cl[m]]
+    if (!length(others)) return(0)
+    mean(C[m, others])
+  }, numeric(1))
+  
+  tibble(
+    Mountain     = names(cl),
+    Consensus    = as.character(cl),
+    Stability    = round(stability, 3),
+    Disagreement = round(disagreement, 3),
+    Separation   = round(stability - disagreement, 3)
+  ) %>% arrange(Stability)
+}
+##============================================================================##
+
+
+##============================================================================##
+## plot_alluvial_highlight ----
+##============================================================================##
+plot_alluvial_highlight <- function(cluster_tbl,
+                                    dataset_name     = NULL,
+                                    highlight        = NULL,
+                                    stability_tbl    = NULL,
+                                    highlight_thresh = 0.7,
+                                    method_order     = NULL,
+                                    palette          = NULL,
+                                    title            = NULL) {
+  
+  dat <- cluster_tbl
+  if (!is.null(dataset_name)) dat <- dplyr::filter(dat, Dataset == dataset_name)
+  dat <- dat %>%
+    dplyr::filter(!is.na(Group)) %>%
+    dplyr::distinct(Mountain, Method, Group)
+  
+  # Auto-detect unstable mountains if no explicit list given
+  if (is.null(highlight) && !is.null(stability_tbl)) {
+    highlight <- stability_tbl$Mountain[stability_tbl$Stability < highlight_thresh]
+    message("Auto-highlighting ", length(highlight),
+            " unstable mountain(s) (stability < ", highlight_thresh, ")")
+  }
+  highlight <- highlight %||% character(0)
+  dat$Highlight <- dat$Mountain %in% highlight
+  
+  dat$Method <- factor(dat$Method,
+                       levels = method_order %||% unique(dat$Method))
+  dat$Group  <- factor(dat$Group)
+  
+  n_g <- nlevels(dat$Group)
+  if (is.null(palette)) {
+    palette <- if (n_g <= 8)
+      RColorBrewer::brewer.pal(max(3, n_g), "Set2")[seq_len(n_g)]
+    else viridisLite::viridis(n_g)
+  }
+  names(palette) <- levels(dat$Group)
+  
+  bg <- dplyr::filter(dat, !Highlight)
+  fg <- dplyr::filter(dat,  Highlight)
+  
+  p <- ggplot(mapping = aes(x = Method, stratum = Group,
+                            alluvium = Mountain, fill = Group))
+  
+  if (nrow(bg))
+    p <- p + geom_flow(data = bg, stat = "alluvium",
+                       lode.guidance = "frontback",
+                       color = "gray85", alpha = 0.20, linewidth = 0.2)
+  if (nrow(fg))
+    p <- p + geom_flow(data = fg, stat = "alluvium",
+                       lode.guidance = "frontback",
+                       color = "black", alpha = 0.95, linewidth = 0.7)
+  
+  p <- p +
+    geom_stratum(data = dat, alpha = 0.85,
+                 color = "white", linewidth = 0.5) +
+    geom_text(data = dat, stat = "stratum", aes(label = Group),
+              size = 3.3, fontface = "bold", color = "white") +
+    scale_fill_manual(values = palette, guide = "none") +
+    labs(
+      title    = title %||% paste("Cluster flow —",
+                                  dataset_name %||% "all datasets"),
+      subtitle = if (length(highlight))
+        paste("Highlighted:", paste(highlight, collapse = ", ")) else NULL,
+      x = NULL, y = "Number of mountains"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x        = element_text(angle = 30, hjust = 1, face = "bold"),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor   = element_blank(),
+      plot.title         = element_text(face = "bold"),
+      plot.subtitle      = element_text(color = "gray30", size = 10)
+    )
+  
+  # Label the highlighted ribbons at the rightmost axis
+  if (length(highlight)) {
+    last_m <- levels(dat$Method)[nlevels(dat$Method)]
+    p <- p + ggrepel::geom_text_repel(
+      data = dat %>% dplyr::filter(Highlight, Method == last_m),
+      aes(label = Mountain),
+      stat = "alluvium",
+      nudge_x = 0.35, hjust = 0, direction = "y",
+      size = 3, segment.color = "gray40", segment.size = 0.3,
+      box.padding = 0.2
+    )
+  }
+  
+  p
+}
+##============================================================================##
+
+
+##============================================================================##
+## plot_alluvial_uncertainty ----
+##============================================================================##
+plot_alluvial_uncertainty <- function(cluster_tbl, stability_tbl,
+                                      dataset_name = NULL,
+                                      method_order = NULL,
+                                      palette      = NULL,
+                                      title        = NULL) {
+  
+  dat <- cluster_tbl
+  if (!is.null(dataset_name)) dat <- dplyr::filter(dat, Dataset == dataset_name)
+  dat <- dat %>%
+    dplyr::filter(!is.na(Group)) %>%
+    dplyr::distinct(Mountain, Method, Group) %>%
+    dplyr::left_join(stability_tbl %>% dplyr::select(Mountain, Stability),
+                     by = "Mountain")
+  
+  dat$Method <- factor(dat$Method,
+                       levels = method_order %||% unique(dat$Method))
+  dat$Group  <- factor(dat$Group)
+  
+  n_g <- nlevels(dat$Group)
+  if (is.null(palette)) {
+    palette <- if (n_g <= 8)
+      RColorBrewer::brewer.pal(max(3, n_g), "Set2")[seq_len(n_g)]
+    else viridisLite::viridis(n_g)
+  }
+  names(palette) <- levels(dat$Group)
+  
+  ggplot(dat, aes(x = Method, stratum = Group, alluvium = Mountain,
+                  fill = Group)) +
+    geom_flow(aes(alpha = Stability),
+              stat = "alluvium", lode.guidance = "frontback",
+              color = "gray40", linewidth = 0.3) +
+    geom_stratum(alpha = 0.9, color = "white", linewidth = 0.5) +
+    geom_text(stat = "stratum", aes(label = Group),
+              size = 3.3, fontface = "bold", color = "white") +
+    scale_fill_manual(values = palette, guide = "none") +
+    scale_alpha_continuous(
+      name   = "Stability",
+      range  = c(0.15, 1),
+      limits = c(0, 1),
+      breaks = c(0.25, 0.5, 0.75, 1)
+    ) +
+    labs(
+      title    = title %||% paste("Cluster uncertainty —",
+                                  dataset_name %||% "all datasets"),
+      subtitle = "Opaque ribbons = high agreement across methods",
+      x = NULL, y = "Number of mountains"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x        = element_text(angle = 30, hjust = 1, face = "bold"),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor   = element_blank(),
+      plot.title         = element_text(face = "bold"),
+      legend.position    = "right"
+    )
+}
+##============================================================================##
+
+
+##============================================================================##
+## plot_coassoc_heatmap ----
+##============================================================================##
+plot_coassoc_heatmap <- function(coassoc_result, 
+                                 consensus_result, 
+                                 title = NULL) {
+  
+  C  <- coassoc_result$coassoc
+  cl <- consensus_result$clusters
+  ord <- names(cl)[order(cl, names(cl))]           # order by consensus cluster
+  C   <- C[ord, ord]
+  
+  df <- as.data.frame(as.table(C)) %>%
+    setNames(c("Row", "Col", "Coassoc"))
+  df$Row <- factor(df$Row, levels = ord)
+  df$Col <- factor(df$Col, levels = ord)
+  
+  # Cluster boundaries (lines between different consensus groups)
+  breaks <- cumsum(rle(unname(cl[ord]))$lengths) + 0.5
+  breaks <- breaks[-length(breaks)]
+  
+  ggplot(df, aes(Row, Col, fill = Coassoc)) +
+    geom_tile() +
+    geom_hline(yintercept = breaks, color = "white", linewidth = 0.6) +
+    geom_vline(xintercept = breaks, color = "white", linewidth = 0.6) +
+    scale_fill_viridis_c(name = "Co-assoc.", limits = c(0, 1),
+                         option = "rocket", direction = -1) +
+    coord_equal() +
+    labs(title = title %||% "Co-association matrix (ordered by consensus)",
+         x = NULL, y = NULL) +
+    theme_minimal(base_size = 11) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid  = element_blank()
+    )
+}
+##============================================================================##
+
+
+##============================================================================##
+## consensus_summary ----
+##============================================================================##
+consensus_summary <- function(coassoc_result, consensus_result,
+                              cluster_tbl, dataset_name) {
+  
+  cl <- consensus_result$clusters
+  C  <- coassoc_result$coassoc
+  d  <- as.dist(1 - C)
+  
+  sil <- cluster::silhouette(cl, d)
+  
+  # Mean co-assoc of consensus with each individual method (ARI would also work)
+  method_agreement <- cluster_tbl %>%
+    dplyr::filter(Dataset == dataset_name, !is.na(Group)) %>%
+    dplyr::distinct(Mountain, Method, Group) %>%
+    dplyr::group_split(Method) %>%
+    purrr::map_dfr(function(df) {
+      labs_m <- setNames(df$Group, df$Mountain)
+      common <- intersect(names(cl), names(labs_m))
+      tibble(
+        Method = unique(df$Method),
+        ARI    = round(aricode::ARI(cl[common], labs_m[common]), 3),
+        NMI    = round(aricode::NMI(cl[common], labs_m[common]), 3)
+      )
+    }) %>% dplyr::arrange(-ARI)
+  
+  list(
+    k                 = consensus_result$k,
+    cophenetic_r      = round(consensus_result$cophenetic_r, 3),
+    mean_silhouette   = round(mean(sil[, 3]), 3),
+    cluster_sizes     = table(cl),
+    agreement_per_method = method_agreement
+  )
+}
+##============================================================================##
+
+
+##============================================================================##
+## plot_consensus_map ----
+##============================================================================##
+plot_consensus_map <- function(shape_sf, 
+                               consensus_result, 
+                               stability_tbl,
+                               title = "Consensus bioregionalization") {
+  
+  cl  <- consensus_result$clusters
+  df  <- tibble(Mountain = names(cl), Consensus = factor(cl)) %>%
+    dplyr::left_join(stability_tbl %>% dplyr::select(Mountain, Stability),
+                     by = "Mountain")
+  
+  shp <- shape_sf %>%
+    dplyr::mutate(Mountain = as.character(Mountain)) %>%
+    dplyr::left_join(df, by = "Mountain")
+  
+  n_g <- nlevels(shp$Consensus)
+  pal <- RColorBrewer::brewer.pal(max(3, n_g), "Set2")[seq_len(n_g)]
+  
+  ggplot(shp) +
+    geom_sf(aes(fill = Consensus, alpha = Stability),
+            color = "grey20", linewidth = 0.3) +
+    geom_sf_text(aes(label = Mountain), size = 2.8, color = "black") +
+    scale_fill_manual(values = pal, name = "Consensus\nregion") +
+    scale_alpha_continuous(range = c(0.35, 1), limits = c(0, 1),
+                           name = "Stability") +
+    labs(title = title,
+         subtitle = paste0("k = ", consensus_result$k,
+                           " · mean silhouette = ",
+                           round(mean(cluster::silhouette(
+                             cl, as.dist(1 - consensus_result$coassoc))[, 3]), 3))) +
+    theme_void(base_size = 12) +
+    theme(plot.title = element_text(face = "bold"),
+          plot.subtitle = element_text(color = "gray30"))
+}
+##============================================================================##
+
+
+##============================================================================##
+## plot_alluvial_final ----
+##============================================================================##
+plot_alluvial_final <- function(cluster_tbl,
+                                dataset_name       = NULL,
+                                reference_clusters,
+                                reference_name     = NULL,
+                                method_order       = c("louvain", "greedy", "walktrap",
+                                                       "phy_sim", "tax_sim"),
+                                palette_name       = "Lakota",
+                                stratum_palette    = "Isfahan1",
+                                title              = NULL,
+                                label_size         = 3.2,
+                                font_family        = "Palatino Linotype",
+                                verbose            = TRUE) {
+  
+  # ── 1. Initial subset ───────────────────────────────────────────────
+  dat <- cluster_tbl
+  if (!is.null(dataset_name) && "Dataset" %in% names(dat)) {
+    dat <- dplyr::filter(dat, Dataset == dataset_name)
+  }
+  dat <- dat %>%
+    dplyr::filter(Method %in% method_order) %>%
+    dplyr::mutate(Island = as.character(Island))
+  
+  # ── 2. Reference clusters → per-Island colour key ─────────────────
+  ref_df <- tibble::tibble(
+    Island = names(reference_clusters),
+    RefGroup = factor(as.integer(unname(reference_clusters)))
+  )
+  
+  # ── 3. Diagnostics ──────────────────────────────────────────────────
+  cl_mtns  <- sort(unique(dat$Island))
+  ref_mtns <- sort(unique(ref_df$Island))
+  miss_ref   <- setdiff(cl_mtns,  ref_mtns)
+  miss_clust <- setdiff(ref_mtns, cl_mtns)
+  
+  if (verbose) {
+    if (length(miss_ref) > 0)
+      message("⚠ Dropping (no match in reference): ",
+              paste(miss_ref, collapse = ", "))
+    if (length(miss_clust) > 0)
+      message("⚠ Reference Islands absent from cluster_tbl: ",
+              paste(miss_clust, collapse = ", "))
+  }
+  
+  # ── 4. Join + drop NAs ──────────────────────────────────────────────
+  dat <- dat %>%
+    dplyr::left_join(ref_df, by = "Island") %>%
+    dplyr::filter(!is.na(RefGroup), !is.na(Group)) %>%
+    dplyr::group_by(Island, Method) %>%
+    dplyr::slice(1) %>%
+    dplyr::ungroup()
+  
+  # ── 5. Enforce complete rectangle ──────────────────────────────────
+  coverage   <- dat %>% dplyr::count(Island, name = "n_methods")
+  incomplete <- dplyr::filter(coverage, n_methods < length(method_order))
+  
+  if (nrow(incomplete) > 0) {
+    if (verbose) {
+      message("⚠ Dropping Islands with incomplete method coverage:")
+      print(incomplete, n = Inf)
+    }
+    dat <- dplyr::filter(dat, !Island %in% incomplete$Island)
+  }
+  
+  if (nrow(dat) == 0)
+    stop("No rows survived cleaning — check Island name harmonisation.")
+  
+  # ── 6. Factors & palettes ───────────────────────────────────────────
+  dat <- dat %>%
+    dplyr::mutate(
+      Method   = factor(Method, levels = method_order),
+      Group    = factor(Group),
+      RefGroup = droplevels(RefGroup)
+    ) %>%
+    dplyr::arrange(RefGroup, Island)
+  
+  n_ref   <- nlevels(dat$RefGroup)
+  pal_ref <- MetBrewer::met.brewer(palette_name, n_ref)
+  names(pal_ref) <- levels(dat$RefGroup)
+  
+  n_grp   <- nlevels(dat$Group)
+  pal_grp <- MetBrewer::met.brewer(stratum_palette, n_grp, type = "continuous")
+  names(pal_grp) <- levels(dat$Group)
+  
+  first_m <- method_order[1]
+  last_m  <- method_order[length(method_order)]
+  ref_lab <- reference_name %||% "reference clustering"
+  
+  # ── 7. Plot ─────────────────────────────────────────────────────────
+  ggplot(dat, aes(x = Method, stratum = Group, alluvium = Island)) +
+    
+    # ─── FIRST FILL SCALE: ribbons coloured by reference bioregion ───
+    geom_flow(aes(fill = RefGroup),
+              stat          = "alluvium",
+              lode.guidance = "frontback",
+              color         = "gray25",
+              alpha         = 0.75,
+              linewidth     = 0.3,
+              na.rm         = TRUE) +
+    
+    scale_fill_manual(
+      values       = pal_ref,
+      name         = "Final bioregion",
+      drop         = TRUE,
+      na.translate = FALSE,
+      guide        = guide_legend(
+        order          = 1,
+        title.position = "top",
+        title.hjust    = 0.5,
+        nrow           = 1,
+        override.aes   = list(alpha = 0.9, color = NA)
+      )
+    ) +
+    
+    # ─── SWITCH: lock first scale, open a fresh fill channel ─────────
+    ggnewscale::new_scale_fill() +
+    
+    # ─── SECOND FILL SCALE: strata coloured by per-method group ──────
+    geom_stratum(aes(fill = Group),
+                 alpha     = 0.95,
+                 color     = "white",
+                 linewidth = 0.8,
+                 na.rm     = TRUE) +
+    
+    scale_fill_manual(
+      values       = pal_grp,
+      name         = "Method group",
+      drop         = TRUE,
+      na.translate = FALSE,
+      guide        = guide_legend(
+        order          = 2,
+        title.position = "top",
+        title.hjust    = 0.5,
+        nrow           = 1,
+        override.aes   = list(color = "white")
+      )
+    ) +
+    
+    # ─── Island labels at the extremities ──────────────────────────
+    geom_text(
+      stat = "alluvium",
+      aes(label = ifelse(Method == first_m, as.character(Island), NA)),
+      hjust = 1, nudge_x = -0.35,
+      size = label_size, family = font_family, fontface = "bold",
+      na.rm = TRUE
+    ) +
+    geom_text(
+      stat = "alluvium",
+      aes(label = ifelse(Method == last_m, as.character(Island), NA)),
+      hjust = 0, nudge_x = 0.35,
+      size = label_size, family = font_family, fontface = "bold",
+      na.rm = TRUE
+    ) +
+    
+    scale_x_discrete(expand = expansion(mult = c(0.18, 0.18))) +
+    labs(
+      title    = title %||% "Clustering concordance across methods",
+      subtitle = paste0("Ribbons coloured by the ", ref_lab,
+                        " (k = ", n_ref, ")"),
+      x = NULL, y = NULL
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      text            = element_text(family = font_family),
+      axis.text.x     = element_text(face = "bold", size = 13),
+      axis.text.y     = element_blank(),
+      axis.ticks.y    = element_blank(),
+      axis.title.y    = element_blank(),
+      panel.grid      = element_blank(),
+      plot.title      = element_text(face = "bold", size = 15),
+      plot.subtitle   = element_text(color = "gray30", size = 11),
+      legend.position = "none",
+      legend.box      = "horizontal",   # "vertical" to stack the two legends
+      legend.box.just = "center",
+      legend.title    = element_text(face = "bold"),
+      legend.margin   = margin(t = 10),
+      plot.margin     = margin(20, 20, 20, 20)
+    )
+}
+##============================================================================##
+
+
+##============================================================================##
+## load_comm ----
+##============================================================================##
+load_comm <- function(path) {
+  m <- as.matrix(readRDS(path))
+  m[m > 0] <- 1L
+  storage.mode(m) <- "integer"
+  m
+}
+##============================================================================##
+
+
+
+##============================================================================##
+## harmonise_dist ----
+##============================================================================##
+harmonise_dist <- function(d, lookup = name_map) {
+  labs <- attr(d, "Labels")
+  idx  <- match(labs, names(lookup))
+  labs[!is.na(idx)] <- lookup[idx[!is.na(idx)]]
+  attr(d, "Labels") <- labs
+  d
+}
+##============================================================================##
+
+
+##============================================================================##
+## A1. Core clustering function ----
+##============================================================================##
+## Converts a PA community matrix to a bipartite network and applies
+## one or more module-detection algorithms.
+## Returns a named list (one element per algorithm) with cluster vectors,
+## palettes and sf objects ready for mapping.
+
+run_network_bioregion <- function(comm_mat, shape_sf,
+                                  id_col     = "Island",
+                                  algorithms = c("louvain", "greedy", 
+                                                 "infomap", "leiden",
+                                                 "oslom", "walktrap")) {
+  
+  net        <- bioregion::mat_to_net(comm_mat, weight = TRUE,
+                                      remove_zeroes = TRUE)
+  site_names <- rownames(comm_mat)
+  results    <- list()
+  
+  for (alg in algorithms) {
+    message("    ", alg, " ...")
+    
+    clust <- tryCatch(
+      switch(alg,
+             louvain = bioregion::netclu_louvain(net, bipartite = TRUE),
+             greedy  = bioregion::netclu_greedy(net,  bipartite = TRUE),
+             infomap = bioregion::netclu_infomap(net, bipartite = TRUE),
+             leiden = bioregion::netclu_leiden(net, bipartite = TRUE),
+             oslom  = bioregion::netclu_oslom(net, bipartite = TRUE),
+             walktrap = bioregion::netclu_walktrap(net, bipartite = TRUE),
+             stop("Unknown algorithm: ", alg)),
+      error = function(e) {
+        warning("  ", alg, " failed: ", conditionMessage(e), call. = FALSE)
+        NULL
+      }
+    )
+    if (is.null(clust)) next
+    
+    ## Extract site-level assignments
+    clust_df  <- clust$clusters
+    node_type <- attr(clust_df, "node_type")
+    
+    site_df <- if (!is.null(node_type)) {
+      clust_df[node_type == "site", ]
+    } else {
+      clust_df[clust_df$ID %in% site_names, ]
+    }
+    
+    k_col       <- names(site_df)[ncol(site_df)]
+    cluster_vec <- setNames(as.integer(site_df[[k_col]]), site_df$ID)
+    n_clust     <- length(unique(cluster_vec))
+    
+    pal <- MetBrewer::met.brewer("Lakota", n = max(n_clust, 2))
+    names(pal) <- as.character(seq_len(n_clust))
+    
+    bio_sf <- shape_sf %>%
+      mutate(Island = as.character(.data[[id_col]])) %>%
+      left_join(tibble(Island = names(cluster_vec),
+                       group    = as.integer(cluster_vec)),
+                by = "Island")
+    
+    results[[alg]] <- list(
+      bioregion_obj = clust,
+      cluster_vec   = cluster_vec,
+      n_clust       = n_clust,
+      pal           = pal,
+      sf            = bio_sf
+    )
+  }
+  results
+}
+##============================================================================##
+
+
+##============================================================================##
+## A2. V-measure comparison: network vs hierarchical ----
+##============================================================================##
+
+compare_net_hclust <- function(net_results, bio_list, hclust_keys) {
+  
+  expand_grid(net_alg = names(net_results),
+              hc_key  = hclust_keys) %>%
+    rowwise() %>%
+    mutate(
+      vm = list(tryCatch(
+        vmeasure_calc(x      = net_results[[net_alg]]$sf,
+                      y      = bio_list[[hc_key]]$sf,
+                      x_name = group, y_name = group),
+        error = function(e) list(v_measure = NA, homogeneity = NA,
+                                 completeness = NA)
+      )),
+      V_measure    = vm$v_measure,
+      Homogeneity  = vm$homogeneity,
+      Completeness = vm$completeness,
+      net_K        = net_results[[net_alg]]$n_clust,
+      hc_K         = bio_list[[hc_key]]$optimal_k
+    ) %>%
+    ungroup() %>%
+    select(-vm)
+}
+##============================================================================##
+
+
+##============================================================================##
+## A3. Network map (single algorithm) ----
+##============================================================================##
+
+plot_net_map <- function(net_result, title = "") {
+  ggplot(net_result$sf) +
+    geom_sf(aes(fill = factor(group)), colour = "white", linewidth = 0.3) +
+    scale_fill_manual(values = net_result$pal, name = "Module") +
+    labs(title    = title,
+         subtitle = paste("K =", net_result$n_clust)) +
+    theme_void(base_size = 11) +
+    theme(plot.title    = element_text(face = "bold"),
+          plot.subtitle = element_text(colour = "grey40"))
+}
+##============================================================================##
+
+
+library(dplyr)
+library(tibble)
+library(MuMIn)
+
+#' Run MuMIn Multi-Model Inference Workflow
+#'
+#' @param data A data frame containing the variables.
+#' @param response_var A string representing the dependent variable (e.g., "PD").
+#' @param predictor_vars A character vector of predictor variable names.
+#' @param delta_threshold The threshold for delta AICc (default is 2).
+#' @return A list containing the dredge object, top models, averaged model, and variable importance.
+run_mumin_workflow <- function(data, response_var, predictor_vars, delta_threshold = 2) {
+  
+  # 1. Dynamically build the formula
+  model_formula <- reformulate(termlabels = predictor_vars, response = response_var)
+  
+  # 2. Fit the global full model
+  global_model <- lm(model_formula, data = data)
+  
+  # 3. Generate all possible sub-models ranked by AICc
+  dd <- dredge(global_model, rank = "AICc")
+  
+  # 4. Perform model averaging on the confidence set
+  avg_model <- model.avg(dd, subset = delta < delta_threshold)
+  
+  # Return a clean list of outputs so you don't lose any information
+  list(
+    global_formula = model_formula,
+    dredge_table   = dd,
+    top_models     = subset(dd, delta < delta_threshold),
+    averaged_model = avg_model,
+    importance     = sw(dd)
+  )
+}
+
+extract_pub_table <- function(model_results) {
+  # 1. Summarize the averaged model
+  avg_sum <- summary(model_results$averaged_model)
+  
+  # 2. Extract the 'full' coefficients matrix 
+  coefs <- as.data.frame(avg_sum$coefmat.full) %>%
+    rownames_to_column("Variable")
+  
+  # 3. Extract 95% Confidence Intervals
+  cis <- as.data.frame(confint(model_results$averaged_model, full = TRUE)) %>%
+    rownames_to_column("Variable") %>%
+    rename(CI_Lower = `2.5 %`, CI_Upper = `97.5 %`)
+  
+  # 4. Extract Variable Importance
+  importances <- data.frame(
+    Variable = names(model_results$importance),
+    Importance = as.numeric(model_results$importance)
+  )
+  
+  # 5. Combine everything into a final table and clean it up
+  pub_table <- coefs %>%
+    left_join(cis, by = "Variable") %>%
+    left_join(importances, by = "Variable") %>%
+    # Select and rename the columns
+    select(
+      Variable,
+      Estimate,
+      Std_Error = `Std. Error`,
+      CI_Lower,
+      CI_Upper,
+      P_value = `Pr(>|z|)`,
+      Importance
+    ) %>%
+    # Round all numeric columns to 3 decimal places
+    mutate(across(where(is.numeric), ~ round(.x, 3))) %>%
+    # Sort from most important variable to least important
+    arrange(desc(Importance))
+  
+  return(pub_table)
+}
+
+
+library(ggplot2)
+library(dplyr)
+
+create_forest_plot <- function(pub_table, plot_title = "Model-Averaged Predictors") {
+  
+  # 1. Prep the data for plotting
+  plot_data <- pub_table %>%
+    # Remove the Intercept
+    filter(Variable != "(Intercept)") %>%
+    # Create a new column to identify "Significant" variables (CI doesn't cross zero)
+    mutate(
+      Significant = ifelse(CI_Lower > 0 | CI_Upper < 0, "Significant", "Not Significant"),
+      # Lock in the order of the variables so the most important are at the top
+      Variable = factor(Variable, levels = rev(Variable))
+    )
+  
+  # 2. Build the Forest Plot
+  p <- ggplot(plot_data, aes(x = Estimate, y = Variable, color = Significant)) +
+    # Draw the critical "Line of No Effect" at zero
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50", linewidth = 1) +
+    
+    # Draw the Confidence Intervals (horizontal lines)
+    geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.2, linewidth = 0.8) +
+    
+    # Draw the point estimates (the dots)
+    geom_point(size = 3) +
+    
+    # Customize the colors 
+    scale_color_manual(values = c("Not Significant" = "gray70", "Significant" = "#005b96")) +
+    
+    # Clean, professional theme
+    theme_minimal(base_size = 14) +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank(), 
+      axis.text.y = element_text(face = "bold", color = "black"),
+      legend.position = "bottom",
+      legend.title = element_blank()
+    ) +
+    
+    # Labels
+    labs(
+      x = "Model-Averaged Estimate (95% CI)",
+      y = NULL,
+      title = plot_title,
+      subtitle = "Relative variable importance determines order (top to bottom)"
+    )
+  
+  # Return the ggplot object
+  return(p)
+}
+
+
+## A tiny "null-coalescing" helper used by several plotting functions.
+## `x %||% y` returns x if x is not NULL, otherwise y.
+`%||%` <- function(x, y) if (is.null(x)) y else x
