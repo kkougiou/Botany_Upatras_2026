@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: "Kougioumoutzis"
+    given-names: "Konstantinos"
+title: "Code and data for the 2-day workshop delivered in May 2026 at the Department of Biology, University of Patras, Greece"
+version: 1.0.0
+doi: 10.5281/zenodo.20369680
+date-released: 2026-05-26
+url: "[https://github.com/kkougiou/Botany_Upatras_2026](https://github.com/kkougiou/Botany_Upatras_2026)"
