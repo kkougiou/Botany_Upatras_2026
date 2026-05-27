@@ -13,8 +13,8 @@ A 2-day standalong workshop developed for the postgraduate students enrolled in 
 
 🌐 **Live slides:**
 
-- Day 1: 
-- Day 2: <https://kkougiou.github.io/Botany_Upatras_2026/Biogeography.html>
+- Day 1: <https://kkougiou.github.io/Botany_Upatras_2026/Biogeography.html>
+- Day 2: <https://kkougiou.github.io/Botany_Upatras_2026/Spatial data.html>
 
 📄 **DOI:** <https://doi.org/10.5281/zenodo.20369680>  
 ✉️ **Contact:** kkougiou@aua.gr  
@@ -25,8 +25,8 @@ A 2-day standalong workshop developed for the postgraduate students enrolled in 
 
 | Day | Topic | File |
 |:---:|---|---|
-| **1** | Spatial data retrieval, cleaning, harmonisation | `day1-spatial-data.qmd` |
-| **2** | Biodiversity metrics, β-diversity, SDMs | `day2-biodiversity.qmd` |
+| **1** | Biodiversity metrics, β-diversity | `Biogeography.Rmd` | 
+| **2** | Spatial data retrieval, cleaning, harmonisation (SDMs) | `Spatial data.Rmd` |
 
 
 
@@ -62,9 +62,12 @@ Just visit the [landing page](https://kkougiou.github.io/Botany_Upatras_2026).
 ```text
 seminar-patras/
 ├── .github/workflows/      # CI: render + deploy to GitHub Pages
-├── R/                      # Helper functions sourced by targets
-├── data/{raw,processed}/   # gitignored — populated by the pipeline
-├── images/                 # Logos, static assets
+├── R scripts/              # Helper functions sourced by targets
+├── RDS/                    # Several rds files needed to run time-consuming parts of the analyses
+├── Figures/                # Static assets
+├── Excel/                  # Excel files
+├── Rasters/                # Tif files
+├── Shapefiles/             # Shp files
 ├── .zenodo.json            # Zenodo metadata
 └── CITATION.cff            # Citation metadata
 ```
