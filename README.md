@@ -13,8 +13,8 @@ A 2-day standalong workshop developed for the postgraduate students enrolled in 
 
 🌐 **Live slides:**
 
-- Day 1: 
-- Day 2: <https://kkougiou.github.io/Botany_Upatras_2026/Biogeography.html>
+- Day 1: <https://kkougiou.github.io/Botany_Upatras_2026/Biogeography.html>
+- Day 2: <https://kkougiou.github.io/Botany_Upatras_2026/Spatial-data.html>
 
 📄 **DOI:** <https://doi.org/10.5281/zenodo.20369680>  
 ✉️ **Contact:** kkougiou@aua.gr  
@@ -25,8 +25,8 @@ A 2-day standalong workshop developed for the postgraduate students enrolled in 
 
 | Day | Topic | File |
 |:---:|---|---|
-| **1** | Spatial data retrieval, cleaning, harmonisation | `day1-spatial-data.qmd` |
-| **2** | Biodiversity metrics, β-diversity, SDMs | `day2-biodiversity.qmd` |
+| **1** | Biodiversity metrics, β-diversity | `Biogeography.Rmd` | 
+| **2** | Spatial data retrieval, cleaning, harmonisation (SDMs) | `Spatial data.Rmd` |
 
 
 
@@ -62,12 +62,52 @@ Just visit the [landing page](https://kkougiou.github.io/Botany_Upatras_2026).
 ```text
 seminar-patras/
 ├── .github/workflows/      # CI: render + deploy to GitHub Pages
-├── R/                      # Helper functions sourced by targets
-├── data/{raw,processed}/   # gitignored — populated by the pipeline
-├── images/                 # Logos, static assets
+├── R scripts/              # Helper functions sourced by targets
+├── RDS/                    # Several rds files needed to run time-consuming parts of the analyses
+├── Figures/                # Static assets
+├── Excel/                  # Excel files
+├── Rasters/                # Tif files
+├── Shapefiles/             # Shp files
 ├── .zenodo.json            # Zenodo metadata
 └── CITATION.cff            # Citation metadata
 ```
+
+---
+
+## 🛠️ Pre-Workshop Setup Instructions
+
+Welcome to the Spatial Data and Biodiversity Patterns Workshop! To ensure we can dive straight into the analytics and avoid technical delays, please complete this setup **before** arriving at the workshop.
+
+We are using `renv` for this project. This tool ensures that everyone is running the exact same package versions, guaranteeing that the code works flawlessly on every machine.
+
+### Step 1: System Prerequisites
+Before downloading the workshop materials, please ensure your system is up to date:
+
+* **R (version 4.5.3):** Please update to this exact version. [Download R here](https://cran.r-project.org/).
+* **RStudio:** Ensure you have a recent version installed.
+* **⚠️ Windows Users ONLY - Rtools45:** You **must** install Rtools to compile certain spatial packages from source. 
+  1. Download the Rtools45 installer from the CRAN website.
+  2. Run the installer and **leave all settings on their defaults** (just keep clicking Next).
+  3. Restart your computer or RStudio after installation.
+  *(Mac and Linux users can skip this step).*
+
+### Step 2: Download the Project
+Clone this repository using Git, or click the green **"<> Code"** button at the top of this page and select **"Download ZIP"**. Extract the folder somewhere easily accessible on your computer.
+
+### Step 3: Restore the Environment
+Now, let's let `renv` do the heavy lifting and install the required packages.
+
+1. Open the project folder and double-click the **`.Rproj`** file to open RStudio.
+2. `renv` should automatically activate (you will see a message in the console).
+3. In the R console, type the following command and press Enter:
+   ```R
+   renv::restore()
+   ```
+4. Type `y` (yes) when it asks you to proceed.
+
+**☕ Note:** This process will automatically download and install several heavy spatial analysis packages (like `sf`, `terra`, and `phyloregion`). It may take 10–15 minutes depending on your internet connection and machine. Let it run completely until the console returns to the `>` prompt. 
+
+Once it is done, you are 100% ready for the workshop!
 
 ---
 
