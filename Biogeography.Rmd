@@ -1,6 +1,6 @@
 ---
-title: "Bioregionalisation of the Aegean Islands"
-author: '[Dr. Kostas Kougioumoutzis](https://www.kkougiou.github.io/)'
+title: "Spatial data, macroecological patterns and SDMs using R"
+author: '[Dr. Kostas Kougioumoutzis](https://kkougiou.github.io/)'
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   rmdformats::readthedown:
@@ -46,6 +46,9 @@ library(conflicted)
 
 conflict_prefer("gdm", "sars")
 conflict_prefer("collinear", "spatialEco")
+conflicted::conflicts_prefer(terra::union)
+conflicted::conflicts_prefer(terra::extract)
+conflicted::conflicts_prefer(terra::shift)
 ```
 
 ```{css, echo=FALSE}
@@ -3655,7 +3658,7 @@ endemism categories based on their observed PE and RPE values relative
 to the null distributions[^7].
 
 [^7]: A detailed guide can be found
-    [here](https://docs.ropensci.org/canaper/articles/canape.html))
+    [here](https://docs.ropensci.org/canaper/articles/canape.html)
 
 ```{r CANAPE, eval = F}
 ##============================================================================##
@@ -3850,4 +3853,17 @@ Three obvious extensions are:
     understand the underlying principles of each method and how they can
     be applied to your specific research questions.
 
+
+# Appendix: Complete R Code {#appendix .appendix-block}
+
+Below is the complete, uninterrupted collection of all R code chunks used throughout this analysis for replication and transparency.
+
+```{r display-code, ref.label = setdiff(knitr::all_labels(), c("setup", "display-code")), echo = TRUE, eval = FALSE}
+```
+
 # **References**
+
+
+```{r klippy, echo=FALSE, include=TRUE}
+klippy::klippy()
+```     

@@ -22,3 +22,53 @@
     <a href="https://github.com/kkougiou" class="fab fa-github-alt" style="margin: 0 8px; text-decoration: none;"></a>
 </p>
 &nbsp;
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/2.0.11/clipboard.min.js"></script>
+<style>
+.copy-btn {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  padding: 3px 8px;
+  font-size: 0.8em;
+  color: #fff;
+  background-color: #1a3e5c;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 100;
+}
+div.sourceCode, .appendix-block pre { position: relative; }
+div.sourceCode:hover .copy-btn, .appendix-block pre:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { background-color: #2a5a84; }
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  var codeBlocks = document.querySelectorAll('div.sourceCode, .appendix-block pre');
+  
+  codeBlocks.forEach(function(block, index) {
+    var button = document.createElement('button');
+    button.className = 'copy-btn';
+    button.type = 'button';
+    button.innerText = 'Copy';
+    button.setAttribute('data-clipboard-target', '#code-target-' + index);
+    
+    var codeEl = block.querySelector('code, pre');
+    if (!codeEl) codeEl = block; 
+    codeEl.id = 'code-target-' + index;
+    
+    block.appendChild(button);
+  });
+
+  var clipboard = new ClipboardJS('.copy-btn');
+  clipboard.on('success', function(e) {
+    e.trigger.innerText = 'Copied!';
+    setTimeout(function() { e.trigger.innerText = 'Copy'; }, 2000);
+    e.clearSelection();
+  });
+});
+</script>

@@ -1,7 +1,7 @@
 ---
-title: "Introduction to R Spatial Analysis (Modern Stack)"
-date: "Spring semester 2025-2026"
-author: '[Kostas Kougioumoutzis](https://www.kkougiou.com/)'
+title: "Spatial data, macroecological patterns and SDMs using R"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+author: '[Dr. Kostas Kougioumoutzis](https://kkougiou.github.io/)'
 output:
   rmdformats::readthedown:
     highlight: kate
@@ -20,7 +20,7 @@ bibliography: SDM_EMB.bib
 ---
 
 
-```{r knitr_init, echo=FALSE, cache=FALSE}
+```{r knitr_init, echo=FALSE, cache=FALSE, include = F}
 ##===========================================================================##
 ## Do NOT run this code
 ##===========================================================================##
@@ -40,6 +40,14 @@ opts_chunk$set(echo = TRUE,
                warning = FALSE,
                eval = TRUE)
 opts_knit$set(width = 75)
+
+library(conflicted)
+
+conflict_prefer("collinear", "spatialEco")
+conflicted::conflicts_prefer(terra::union)
+conflicted::conflicts_prefer(terra::extract)
+conflicted::conflicts_prefer(terra::shift)
+conflicted::conflicts_prefer(dplyr::filter)
 ##===========================================================================##
 ```
   
