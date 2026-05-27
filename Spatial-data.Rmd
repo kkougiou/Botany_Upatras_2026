@@ -1,0 +1,1946 @@
+---
+title: "Introduction to R Spatial Analysis (Modern Stack)"
+date: "Spring semester 2025-2026"
+author: '[Kostas Kougioumoutzis](https://www.kkougiou.com/)'
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    toc: 6
+    number_sections: true
+    includes:
+      after_body: footer.html
+    code_folding: show
+    df_print: paged
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+md_extensions: -autolink_bare_uris+hard_line_breaks
+csl: journal-of-biogeography.csl
+bibliography: SDM_EMB.bib
+---
+
+
+```{r knitr_init, echo=FALSE, cache=FALSE}
+##===========================================================================##
+## Do NOT run this code
+##===========================================================================##
+## Global options
+options(Encoding = "UTF-8")
+
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print = "75")
+opts_chunk$set(echo = TRUE,
+               cache = TRUE,
+               prompt = FALSE,
+               tidy = FALSE,
+               message = FALSE,
+               warning = FALSE,
+               eval = TRUE)
+opts_knit$set(width = 75)
+##===========================================================================##
+```
+  
+```{css, echo=FALSE}
+pre {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 400px;
+}
+```  
+  
+<style>
+body {
+text-align: justify}
+</style>  
+      
+All files required for this lab are freely available online [here](https://github.com/kkougiou/Botany_Upatras_2026).
+  
+# **Geographical data**  
+
+## **Introduction**  
+
+In general, geographical data can be divided in two main categories:  
+  
+**1.** Vector data  
+**2.** Raster data  
+  
+The R spatial ecosystem has undergone a major modernization in recent years. The legacy packages `sp`, `rgdal`, `rgeos`, and `maptools` have been **retired**; modern workflows use `sf` for vector data and `terra` for raster data. For an excellent up-to-date reference, see [Geocomputation with R](https://r.geocompx.org/) by Lovelace, Nowosad & Muenchow.
+
+### **Vector data**  
+**Vector** data can be further subdivided into three categories:  
+  
+**1.** Points  
+**2.** Lines  
+**3.** Polygons  
+  
+These data have discrete, well-defined borders and usually have a high level of precision, but are not necessarily accurate.  
+  
+Points located within a coordinate reference system (CRS) constitute the basis of vector data. Points can either be self-standing features (e.g., the city of Patras) or they can be linked together to form more complex geometries, such as lines (e.g., the national road connecting Athens to Patras) and polygons (e.g., the area covered by the city of Patras)^[If you want to deepen your understanding on this, please click [here](https://r.geocompx.org/)].
+  
+The main package we use today for vector data is:  
+  
+**`sf`** — Simple Features for R. It binds to **GDAL** for reading/writing data, to **GEOS** for geometrical operations, and to **PROJ** for projection conversions and datum transformations. By default, it uses the `s2` package for geometry operations on geodetic (long/lat degree) coordinates. You can see the `sf` vignettes [here](https://cran.r-project.org/web/packages/sf/index.html).
+  
+> **Note**: The classic [Applied Spatial Data Analysis with R](https://asdar-book.org/) book by Bivand, Pebesma and Gómez-Rubio [@bivand2008applied] uses the legacy `sp`/`rgdal` workflow. For modern best-practice code, prefer [Geocomputation with R](https://r.geocompx.org/) [@lovelace2019geocomputation]^[You are strongly advised to have a look to both these books].
+  
+### **Raster data**  
+
+On the other hand, **raster** data divide the surface up into cells of constant size (e.g., 1 × 1 km² cells). Raster datasets are the basis of background images used in web-mapping and have been a vital source of geographic data since the origins of aerial photography and satellite-based remote sensing devices. Rasters aggregate spatially specific features to a given resolution, meaning that they are consistent over space and scalable [@lovelace2019geocomputation].
+  
+The geographic raster data model usually consists of a raster header and a matrix (with rows and columns) representing equally spaced cells (i.e., pixels). The raster header defines the coordinate reference system, the extent and the origin. The header defines the extent via the number of columns, the number of rows and the cell size resolution. Hence, starting from the origin, we can easily access and modify each single cell by either using the ID of a cell or by explicitly specifying the rows and columns.
+  
+Raster maps usually represent continuous phenomena, such as elevation, temperature, population density or spectral data. Discrete features such as soil or land-cover classes can also be represented as raster data. Consequently, the discrete borders of these features become blurred, and depending on the spatial task a vector representation might be more suitable.
+  
+In the modern **`terra`** package, all raster data — whether single-layer, multi-layer from a single file, or multi-layer from disparate sources — are represented by **one unified class**: `SpatRaster`. This replaces the older `RasterLayer`, `RasterBrick`, and `RasterStack` classes from the legacy `raster` package. A `SpatRaster` can hold one or many layers and is generally **faster and more memory-efficient** than its predecessors.
+  
+# **Download vector data**   
+  
+## **Install and load packages**      
+We will need to install several libraries first. Note that we no longer install `rgdal`, `rgeos`, `maptools`, `sp`, or `raster` — they are replaced by the modern stack.  
+  
+And then we will have to load those libraries:
+  
+```{r load libraries, eval = TRUE, cache = F}  
+##===========================================================================##
+## Load them
+##===========================================================================##
+library(rgbif)
+library(rinat)
+library(terra)
+library(tidyterra)
+library(geodata)
+library(CoordinateCleaner)
+library(countrycode)
+library(scales)
+library(geodata)
+library(sf)
+library(ggspatial) 
+library(MetBrewer)
+library(elevatr)
+library(epm)
+library(rtrees)
+library(collinear)
+library(tidyverse)
+library(scales)
+##===========================================================================##
+```
+  
+## **Polygon data**  
+  
+### **Country boundaries**  
+  
+We can download country boundaries from [GADM](https://gadm.org/) using `geodata::gadm()`. This is the modern replacement for the deprecated `raster::getData('GADM', ...)` and it returns a `SpatVector` object (from `terra`) that we will convert to `sf` for our workflow.
+  
+```{r Download polygon data, eval = TRUE, cache = F}
+##===========================================================================##
+## Download the data for Greece (level 3 = municipalities)
+##===========================================================================##
+## 'path' tells geodata where to cache the downloaded file
+Greece <- geodata::gadm(country = "GRC", level = 3, path = getwd())
+##===========================================================================##
+```
+  
+We can easily plot the data we have just downloaded. With `sf`, plotting the geometry only is best done via `st_geometry()`.
+  
+```{r Plot polygon data, eval = TRUE, cache = TRUE}
+plot(Greece)
+```
+  
+It is equally easy to inspect those data.
+  
+```{r Inspect polygon data, eval = F, cache = TRUE}
+Greece
+```
+  
+We see that our object has a Coordinate Reference System (CRS) and that it includes several columns.
+  
+```{r Polygon names, eval = F, cache = TRUE}  
+names(Greece)
+```
+  
+Now we create a new spatial object by subsetting Greece using `dplyr`-style filtering (which works seamlessly on `sf` objects).
+  
+```{r Subset Greece, eval = TRUE, cache = F}  
+Crete <- Greece %>% 
+  tidyterra::filter(NAME_1 == "Crete")
+
+```
+    
+```{r Plot Crete, eval = TRUE, cache = F}
+plot(Crete)
+```
+    
+### **Protected areas**  
+  
+We can also download data from the [World Database on Protected Areas](https://www.protectedplanet.net/), the most up-to-date and comprehensive global source of data on protected areas and other effective area-based conservation measures (OECMs). It is updated monthly with submissions from governments, NGOs, landowners, and communities. We will use the `wdpar` package, which returns `sf` objects natively^[Since this action might take a while or require a stable internet connection or the wdpa website might block numerous attempts from the same IP, just load the data from the relevant rds file for the time being].
+  
+```{r Download wdpar data for Greece, eval = F, cache = TRUE}
+gr_raw_pa_data <- wdpa_fetch("Greece", wait = TRUE, download_dir = tempdir())
+```
+  
+If you need more information on what these columns mean, please refer to the [WDPA Manual](https://www.protectedplanet.net/en/resources/wdpa-manual).
+    
+We need to change the **CRS** for plotting. The raw WDPA data are typically delivered in Mollweide/Mercator-like equal-area projections; we want geographic coordinates (long/lat) for plotting alongside other layers. We use `st_transform()` with EPSG code **4326**, which corresponds to the [WGS 84](https://en.wikipedia.org/wiki/World_Geodetic_System) geographic CRS — the reference system used by GPS. 
+
+> Greece also has a national projected CRS, **HGRS87** (EPSG:2100), also known as ΕΓΣΑ'87, used widely for civilian mapping. It uses the GRS80 ellipsoid with a Transverse Mercator projection centered at 24°E. For more, see the [HGRS87 Wikipedia article](https://en.wikipedia.org/wiki/Hellenic_Geodetic_Reference_System_1987).
+
+```{r}
+gr_pa_data <- readRDS('RDS/WDPA Greece.rds') %>% 
+  st_as_sf()
+```
+
+As a next step, we will clip the terrestrial protected areas to the Greek coastline. First, sanity-check the boundary geometry.
+  
+```{r Clip, eval = F, cache = TRUE}
+## 1. Convert the sf objects to terra SpatVectors
+pa_vect <- vect(gr_pa_data)
+
+# 2. Split the dataset
+pa_terr <- pa_vect[pa_vect$REALM == "Terrestrial", ]
+pa_mar  <- pa_vect[pa_vect$REALM == "Marine", ]
+pa_oth  <- pa_vect[!pa_vect$REALM %in% c("Terrestrial", "Marine"), ]
+
+# 3. Perform fast spatial operations
+# Note: To avoid joining all 326 admin attributes, we aggregate Greece into a single boundary
+greece_agg <- aggregate(Greece) 
+
+terr_clipped <- terra::intersect(pa_terr, greece_agg)
+mar_clipped  <- terra::erase(pa_mar, Greece) # erase is terra's equivalent to st_difference
+
+# 4. Recombine and convert back to sf
+gr_pa_data_fast <- rbind(terr_clipped, mar_clipped, pa_oth) %>% 
+  st_as_sf()
+```
+
+```{r pag, include = FALSE, cache = TRUE, eval = T}
+gr_pa_data_fast <- readRDS('RDS/PA_Data.rds')
+```
+
+
+We can calculate the percentage of land inside each [IUCN management category](https://www.iucn.org/theme/protected-areas/about/protected-area-categories).
+  
+```{r IUCN Categories, eval = TRUE, cache = TRUE}
+statistic <- gr_pa_data_fast  %>% 
+  st_drop_geometry() %>%
+  group_by(IUCN_CAT) %>%
+  summarize(area_km = sum(REP_AREA)) %>%
+  ungroup() %>%
+  mutate(percentage = (area_km / sum(area_km)) * 100) %>%
+  arrange(desc(area_km))
+
+statistic
+```
+  
+Keep only those PAs that have been assigned to an IUCN category (I–VI).
+  
+```{r Filter out}
+gr_pa_data_filtered <- gr_pa_data_fast %>%
+  filter(!str_detect(IUCN_CAT, "Not"))
+
+```
+  
+Let's visualise the results.
+  
+```{r Visualise PA, eval = F}
+# Transform to Greek Grid (2100) to simplify by meters, simplify by 50m, back to WGS 84
+greece_simple <- Greece %>% 
+  st_as_sf() %>% 
+  st_geometry() %>% 
+  st_union() %>% 
+  st_transform(2100) %>% 
+  st_simplify(dTolerance = 50) %>% 
+  st_transform(4326)
+
+pa_simple <- gr_pa_data_filtered %>% 
+  st_transform(2100) %>% 
+  st_simplify(dTolerance = 50) %>% 
+  st_transform(4326)
+```
+
+```{r simple, include = F, eval = T, cache = T}
+greece_simple <- readRDS('RDS/Greece simple.rds')
+pa_simple <- readRDS('RDS/PA simple.rds')
+```
+
+
+```{r simple2, eval = T}
+# Define specificcolors for the base map
+color_sea <- "#f0f8ff"    # Alice Blue (light sea)
+color_land <- "#eeeeee"   # Very Light Gray (neutral background land)
+color_border <- "#aaaaaa" # Medium Gray (land borders)
+
+
+ggplot() +
+  # 1. Base Layer: The Sea (Panel Background)
+  theme_minimal() + # Use minimal base to start
+  
+  # 2. Base Layer: The Land (Crete Base)
+  geom_sf(
+    data = greece_simple, 
+    fill = color_land, 
+    color = color_border, 
+    linewidth = 0.3
+  ) +
+  
+  # 3. Data Layer: Protected Areas
+  # No color border, slight transparency, aesthetic mapping
+  geom_sf(
+    data = pa_simple, 
+    aes(fill = IUCN_CAT), 
+    color = NA, 
+    alpha = 0.9
+  ) +
+  
+  MetBrewer::scale_fill_met_d(
+    name = "Lakota",
+    na.value = "gray70") +
+  
+  
+  annotation_north_arrow(
+    location = "tr", # Top-Left
+    which_north = "true",
+    pad_x = unit(0.2, "in"), # Padding from edge
+    pad_y = unit(0.2, "in"),
+    style = north_arrow_fancy_orienteering(
+      fill = c("grey10", "white"),
+      line_col = "grey10"
+    )
+  ) +
+  
+  
+  annotation_scale(
+    location = "bl", # Bottom-Left
+    width_hint = 0.25, # Scale width as fraction of plot
+    style = "ticks", # 'ticks' or 'bar'
+    text_cex = 0.8, # Text size
+    pad_x = unit(0.3, "in"),
+    pad_y = unit(0.3, "in")
+  ) +
+  
+  theme(
+    # Basic Plot Titles
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    axis.title = element_blank(), # Standard for map frames
+    
+    # Gridlines (Graticules) - Make them light, dashed white
+    panel.grid = element_line(color = "white", linetype = "dashed", linewidth = 0.2), 
+    
+    # Legend Placement - Moving to the right looks cleaner when combined with scale elements
+    legend.position = "bottom",
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.direction = "horizontal",
+    
+    # Color the Sea
+    panel.background = element_rect(fill = color_sea, color = NA),
+    plot.background = element_rect(fill = color_sea, color = NA),
+    
+    # Axis Text (Lat/Lon labels)
+    axis.text = element_text(size = 8, color = "grey30")
+  ) +
+  
+  # 8. Titles and Labels
+  labs(
+    fill = "IUCN Category",
+    title = "Protected Areas Network (PAN) of Greece",
+    subtitle = "Analysis clipped to simplified coastline (dTolerance = 50m)",
+    caption = "Coordinate Reference System: WGS 84 (EPSG:4326)\nData Source: WDPA"
+  ) +
+  # 2. Force the 'fill' legend to strictly use 1 row
+  guides(
+    fill = guide_legend(
+      nrow = 1, 
+      # PRO-TIP: Move the title to the left of the items (instead of on top)
+      # to save even more vertical space and make it look like a sleek dashboard.
+      title.position = "left", 
+      title.vjust = 0.5
+    )
+  )
+```
+  
+Now we restrict the analysis to Crete using `st_intersection()`.
+  
+```{r Intersection, eval = F}
+# Simplify Crete
+crete_simple <- Crete %>% 
+  st_as_sf() %>% 
+  st_union() %>% 
+  st_transform(2100) %>% 
+  st_simplify(dTolerance = 50) # 50 meters
+
+# Simplify Protected Areas
+pa_simple <- gr_pa_data %>%
+  st_transform(2100) %>% 
+  st_simplify(dTolerance = 50) # 50 meters
+
+# Now do the intersection and plotting with the simple objects
+pa_crete_final <- pa_simple %>% 
+  st_crop(st_bbox(crete_simple)) %>% 
+  st_intersection(crete_simple) %>% 
+  st_transform(4326)
+```
+  
+```{r crete-simple, include = T, eval = T, cache = T}
+crete_simple <- readRDS('RDS/Crete simple.rds')
+pa_simple <- readRDS('RDS/PA Crete simple.rds')
+pa_crete_final <- readRDS('RDS/PA Crete simple final.rds')
+```
+
+
+And then let's visualize the results:
+  
+```{r All PAs in Crete}
+##============================================================================##
+## Color function ----
+##============================================================================##
+col2alpha <- function(col, alpha) {
+  col_rgb <- col2rgb(col)/255
+  rgb(col_rgb[1], col_rgb[2], col_rgb[3],
+      alpha = alpha)
+}
+##============================================================================##
+
+ggplot() +
+  # 1. Base Layer: The Sea (Panel Background)
+  theme_minimal() + # Use minimal base to start
+  
+  # 2. Base Layer: The Land (Crete Base)
+  geom_sf(
+    data = crete_simple, 
+    fill = color_land, 
+    color = color_border, 
+    linewidth = 0.3
+  ) +
+  
+  # 3. Data Layer: Protected Areas
+  # No color border, slight transparency, aesthetic mapping
+  geom_sf(
+    data = pa_crete_final, 
+    aes(fill = IUCN_CAT), 
+    color = NA, 
+    alpha = 0.9
+  ) +
+  
+  
+  MetBrewer::scale_fill_met_d(
+    name = "Moreau",
+    na.value = "gray70") +
+  
+  
+  annotation_north_arrow(
+    location = "tr", # Top-Left
+    which_north = "true",
+    pad_x = unit(0.2, "in"), # Padding from edge
+    pad_y = unit(0.2, "in"),
+    style = north_arrow_fancy_orienteering(
+      fill = c("grey10", "white"),
+      line_col = "grey10"
+    )
+  ) +
+  
+  annotation_scale(
+    location = "bl", # Bottom-Left
+    width_hint = 0.15, # Scale width as fraction of plot
+    style = "ticks", # 'ticks' or 'bar'
+    text_cex = 0.8, # Text size
+    pad_x = unit(0.3, "in"),
+    pad_y = unit(0.3, "in")
+  ) +
+  
+  theme(
+    # Basic Plot Titles
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    axis.title = element_blank(), # Standard for map frames
+    
+    # Gridlines (Graticules) - Make them light, dashed white
+    panel.grid = element_line(color = "white", linetype = "dashed", linewidth = 0.2), 
+    
+    # Legend Placement - Moving to the right looks cleaner when combined with scale elements
+    legend.position = "bottom",
+    legend.title = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.direction = "horizontal",
+    
+    # Color the Sea
+    # panel.background = element_rect(fill = color_sea, color = NA),
+    plot.background = element_rect(fill = color_sea, color = NA),
+    
+    # Axis Text (Lat/Lon labels)
+    axis.text = element_text(size = 8, color = "grey30"),
+    
+    panel.grid.major = element_line(color = gray(0.5), 
+                                    linetype = "blank", 
+                                    size = 0.5), 
+    
+    panel.background = element_rect(fill = col2alpha('steelblue', 0.15))) +
+  
+  # 8. Titles and Labels
+  labs(
+    fill = "IUCN Category",
+    title = "Protected Areas Network (PAN) of Crete",
+    subtitle = "Analysis clipped to simplified coastline (dTolerance = 50m)",
+    caption = "Coordinate Reference System: WGS 84 (EPSG:4326)\nData Source: WDPA"
+  ) +
+  # 2. Force the 'fill' legend to strictly use 1 row
+  guides(
+    fill = guide_legend(
+      nrow = 1, 
+      #title.position = "left", 
+      title.vjust = 0.5
+    )
+  )
+```
+  
+## **Point data**  
+      
+The most basic category of vector data are points. In ecology, points most often represent sampling locations or field observations. Nowadays it is fairly easy to obtain species occurrence data from freely available online databases such as [GBIF](https://www.gbif.org/), [BIEN](http://bien.nceas.ucsb.edu/bien/) and [iNaturalist](https://www.inaturalist.org/). Bear in mind that these databases refer to current/recent species occurrences; for fossil data, see [Paleobiology](https://paleobiodb.org/) and [Neotoma](https://www.neotomadb.org/). There are other databases as well, such as the [PREDICTS](https://www.predicts.org.uk/pages/outputs.html) and the [COMPADRE](https://compadre-db.org/), which deal with time-series and population matrices, respectively. Obviously if someone's interested in conservation-related data, then the [IUCN](https://www.iucnredlist.org/) is the best place to search for this kind of data. You can find several other databases [here](https://docs.google.com/spreadsheets/d/1qsK1MNLsi-QjK9VptgeV2HfrB7mWUVxjZdaj_P9Qs-Y/edit#gid=0).
+  
+Today we explore **GBIF** and **iNaturalist**. GBIF holds over a billion records, while iNaturalist is essentially a citizen-science database. Both can contain erroneous occurrences (misidentifications, coordinates in the sea, etc.) — see Maldonado *et al.* [-@maldonado2015estimating] for details.
+  
+We will use **Petromarula pinnata**, one of the six endemic plant **genera** of Greece, as our example.
+
+![Fig 1. The endemic species **Petromarula pinnata** from Crete.]((G:/Academic/Lessons/EMB/Labs/Labs/TRUE RMD Files/EKPA/Spatial data/0230.jpeg)
+
+### **iNaturalist**  
+  
+First we download data from iNaturalist. To merge with GBIF later, we add a `countryCode` column and remove any rows lacking coordinates.
+  
+```{r Download point data from iNaturalist}
+##============================================================================##
+## Download data and create an additional column
+##============================================================================##
+petromarula_inat <- get_inat_obs(taxon_name = "Petromarula pinnata") %>% 
+  mutate(countryCode = "GR")
+##============================================================================##
+
+
+##============================================================================##
+## Remove any rows without coordinates
+##============================================================================##
+petromarula_inat <- petromarula_inat[complete.cases(petromarula_inat[, 5:6]), ]
+
+## Why do we use the fifth and sixth column to remove any empty rows?
+##============================================================================##
+
+petromarula_inat %>% 
+  head()
+
+```
+  
+Now we clean the coordinates. `CoordinateCleaner` expects a `data.frame`, and the `seas_ref` argument expects an `sf` polygon (Crete), which fits our modern workflow:
+  
+```{r CoordinateCleaner iNat}
+##============================================================================##
+## Clean the coordinates
+##============================================================================##
+flags_rinat <- clean_coordinates(x = petromarula_inat, 
+                                 lon = "longitude",
+                                 lat = "latitude", 
+                                 countries = "countryCode",
+                                 species = "scientific_name",
+                                 tests = c("capitals",
+                                           "centroids",
+                                           "equal",
+                                           "gbif", 
+                                           "zeros",
+                                           "seas"), 
+                                 seas_ref = Crete)
+##============================================================================##
+
+
+##============================================================================##
+## Keep only those that are OK
+##============================================================================##
+flags_rinats <- flags_rinat %>%
+  mutate(Data = ifelse(.summary == "TRUE", 
+                       "Clean",
+                       "Flagged"), 
+         NAME_1 = "Crete", 
+         Dataset = "iNaturalist") %>%
+  dplyr::filter(str_detect(Data,
+                           "Cle")) %>%
+  dplyr::select(scientific_name, 
+                longitude, 
+                latitude, 
+                Dataset)
+##============================================================================##
+```
+  
+> You could run the above functions for a species that might interest you.
+     
+### **GBIF**  
+
+Let's now download data from GBIF for the same species. The first step is to resolve the GBIF taxon key for our species. The function `name_suggest()` from the `rgbif` package searches all species that more or less fit the request. Only the species names from GBIF that exactly match the name of our species, are kept. 
+
+```{r Download GBIF data}
+spp_petromarula <- name_suggest(q = "Petromarula pinnata",
+                                rank = "species",
+                                limit = 10000)$data$key[1]
+```
+  
+The previous step identifies the taxonomic reference number of our species. Using this reference is the safest way to request species occurrences in GBIF.  
+  
+Now let's download all the occurrences that are present in GBIF and have geographical information (We will download max. 1000 occurrences):
+  
+```{r Download GBIF data 2}
+##============================================================================##
+## Download data
+##============================================================================##
+sp_occ <- occ_search(taxonKey = spp_petromarula, 
+                     country = "GR",
+                     hasCoordinate = T, 
+                     limit = 1000)
+##============================================================================##
+
+
+##============================================================================##
+## To prevent any problem with the pathway it is a good practice to remove blank
+## spaces from species names
+##============================================================================##
+sp_occ$data$name <- sub(" ", "_", sp_occ$data$name)
+##============================================================================##
+
+
+##============================================================================##
+## Total number of occurrences
+##============================================================================##
+sort(table(sp_occ$data$name), decreasing = T)
+```
+  
+GBIF often contains data harvested from iNaturalist, so we remove duplicates:
+  
+```{r Remove iNat from GBIF}
+##============================================================================##
+## Remove iNaturalist occurrences
+##============================================================================##
+sp_occ_rem <- sp_occ$data %>% 
+  filter(!str_detect(references,
+                     "inaturalist"))
+##============================================================================##
+
+
+##============================================================================##
+## How many occurrences in GBIF are also in iNaturalist?
+##============================================================================##
+sp_occ$data %>% 
+  filter(str_detect(references,
+                    "inatu")) %>%
+  NROW()
+
+```
+  
+Then clean the GBIF coordinates the same way as before:
+  
+```{r CoordinateCleaner GBIF}
+##============================================================================##
+## Clean the coordinates
+##============================================================================##
+flags_gbif <- clean_coordinates(
+  x = sp_occ_rem,
+  lon = "decimalLongitude",
+  lat = "decimalLatitude",
+  countries = "countryCode",
+  species = "species",
+  tests = c("capitals",
+            "centroids",
+            "equal",
+            "gbif",
+            "zeros", 
+            "seas"),
+  seas_ref = Crete
+)
+
+##============================================================================##
+
+
+##============================================================================##
+## Keep only those that are OK
+##============================================================================##
+flags_gbif <- flags_gbif  %>% 
+  mutate(Data            = ifelse(.summary, "Clean", "Flagged"),
+         NAME_1          = "Crete",
+         Dataset         = "GBIF",
+         longitude       = decimalLongitude,
+         latitude        = decimalLatitude,
+         scientific_name = "Petromarula pinnata") %>% 
+  filter(Data == "Clean") %>% 
+  select(scientific_name, 
+         longitude,
+         latitude,
+         Dataset)
+```
+   
+
+> You could run the above functions for a species that might interest you. 
+
+### **Join iNaturalist and GBIF data**   
+  
+Join both datasets and convert into an `sf` object (WGS 84):
+  
+```{r Join them}
+flags_both <- full_join(flags_gbif, 
+                        flags_rinats) %>% 
+  st_as_sf(coords = c("longitude",
+                      "latitude"), 
+           crs = 4326)
+```
+  
+Visualise the result:
+  
+```{r Visualise the result from the join}
+flags_both$Dataset <- factor(flags_both$Dataset)
+
+
+ggplot() +
+  # ---------------------------------------------------------------------------
+# 1. Base Layer & Theme Initialization
+# ---------------------------------------------------------------------------
+theme_minimal() +
+  
+  # ---------------------------------------------------------------------------
+# 2. Base Layer: The Land (Crete Base)
+# ---------------------------------------------------------------------------
+geom_sf(
+  data = Crete %>% 
+    st_as_sf(), 
+  fill = color_land, 
+  color = color_border, 
+  linewidth = 0.3
+) +
+  
+  # ---------------------------------------------------------------------------
+# 3. Data Layer: Occurrence Flags
+# ---------------------------------------------------------------------------
+geom_sf(
+  data = flags_both, 
+  aes(color = Dataset, 
+      fill = Dataset, 
+      shape = Dataset),
+  size = 2,
+  alpha = 0.85
+) +
+  
+  
+  # ---------------------------------------------------------------------------
+# 4. Color & Shape Palettes
+# ---------------------------------------------------------------------------
+# Using MetBrewer's Austria palette for the occurrence data points
+MetBrewer::scale_color_met_d(name = "Austria") +
+  MetBrewer::scale_fill_met_d(name = "Austria") +
+  
+  # ---------------------------------------------------------------------------
+# 5. GIS Elements: Scale & Orientation
+# ---------------------------------------------------------------------------
+annotation_north_arrow(
+  location = "tr", # Top-Right (keeps it clear of Crete's long horizontal shape)
+  which_north = "true",
+  pad_x = unit(0.2, "in"), 
+  pad_y = unit(0.2, "in"),
+  style = north_arrow_fancy_orienteering(
+    fill = c("grey10", "white"),
+    line_col = "grey10"
+  )
+) +
+  
+  annotation_scale(
+    location = "bl", # Bottom-Left
+    width_hint = 0.15, 
+    style = "ticks", 
+    text_cex = 0.8, 
+    pad_x = unit(0.3, "in"),
+    pad_y = unit(0.3, "in")
+  ) +
+  
+  # ---------------------------------------------------------------------------
+# 6. Map Extent bounding box
+# ---------------------------------------------------------------------------
+coord_sf(xlim = c(23.4, 26.4), ylim = c(34.7, 35.7), expand = FALSE) +
+  
+  # ---------------------------------------------------------------------------
+# 7. Professional Typography & Layout Settings
+# ---------------------------------------------------------------------------
+theme(
+  
+  # Basic Plot Titles
+  plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+  axis.title = element_blank(), # Standard for map frames
+  
+  # Gridlines (Graticules) - Make them light, dashed white
+  panel.grid = element_line(color = "white", linetype = "dashed", linewidth = 0.2), 
+  
+  # Legend Placement - Moving to the right looks cleaner when combined with scale elements
+  legend.position = "bottom",
+  legend.title = element_text(size = 10, face = "bold"),
+  legend.text = element_text(size = 9),
+  legend.direction = "horizontal",
+  
+  # Color the Sea
+  plot.background = element_rect(fill = color_sea, color = NA),
+  
+  # Axis Text (Lat/Lon labels)
+  axis.text = element_text(size = 8, color = "grey30"),
+  
+  panel.grid.major = element_line(color = gray(0.5), 
+                                  linetype = "dashed", 
+                                  size = 0.5), 
+  
+  panel.background = element_rect(fill = col2alpha('steelblue', 0.15))) +
+  
+  # ---------------------------------------------------------------------------
+# 8. Titles & Legend Customization
+# ---------------------------------------------------------------------------
+labs(
+  title = "Occurrences available online",
+  subtitle = expression(paste("Species: ", italic("Petromarula pinnata"))),
+  caption = "Coordinate Reference System: WGS 84\nData Source: Online Repository",
+  color = "Dataset Source",
+  fill = "Dataset Source",
+  shape = "Dataset Source"
+) +
+  
+  guides(
+    color = guide_legend(nrow = 1, title.position = "left", title.vjust = 0.5),
+    fill = guide_legend(nrow = 1, title.position = "left", title.vjust = 0.5),
+    shape = guide_legend(nrow = 1, title.position = "left", title.vjust = 0.5)
+  )
+```
+  
+### **Download GBIF and iNaturalist data for a specified polygon**    
+  
+We can request occurrences from a polygon directly. With `sf` this is trivial — we use `st_as_text()` to build the **WKT** (Well-Known Text), replacing the legacy `rgeos::writeWKT()`.
+  
+```{r Download data from iNat & GBIF with polygons}
+##============================================================================##
+## Species of interest
+##============================================================================##
+splist <- c("Centaurea idaea", "Petromarula pinnata", "Dianthus juniperinus")
+
+##============================================================================##
+## Get GBIF taxon keys
+##============================================================================##
+keys <- sapply(splist,
+               function(x) name_suggest(x)$data$key[1],
+               USE.NAMES = FALSE)
+
+## ============================================================================##
+## Create an WKT file for the download
+## ============================================================================##
+
+ex_val <- ext(Crete)
+
+
+ex_poly <- as.polygons(ex_val, crs = crs(Crete))
+
+
+ex2 <- geom(ex_poly, wkt = TRUE)
+
+ex2
+
+## ============================================================================##
+## Download the data for these species from GBIF ----
+## ============================================================================##
+dat_ne <- occ_search(taxonKey = keys, 
+                     hasCoordinate = T,
+                     limit = 1000,
+                     geometry = ex2)
+## ============================================================================##
+
+
+## ============================================================================##
+## Convert it to a dataframe ----
+## ============================================================================##
+for (i in seq_along(dat_ne)) {
+  dat_ne[[i]] <- dat_ne[[i]]$data
+}
+
+dat_ne <- lapply(dat_ne, "as_tibble")
+
+dat_ne <- bind_rows(dat_ne)
+## ============================================================================##
+
+```
+  
+> Try running the above functions for some species that might be present in Epirus or elsewhere (e.g., *Ophrys helenae*).
+     
+And then for iNaturalist:
+  
+```{r iNat by polygon}
+
+
+## ============================================================================##
+## First, create a vector of the species you are interested in
+## ============================================================================##
+gen_list <- c("Centaurea idaea", "Petromarula pinnata")
+## ============================================================================##
+
+
+## ============================================================================##
+## Create the desired extent
+## ============================================================================##
+## We are interested in Crete
+ext(Crete)
+
+
+bounds <- c(34.80069, 23.47347, 35.69597, 26.35347)
+## ============================================================================##
+
+
+## ============================================================================##
+## Create an empty list to store them and run a for loop
+## ============================================================================##
+plants <- list()
+for (i in seq_along(gen_list)) {
+  plants[[i]] <- get_inat_obs(taxon_name = gen_list[[i]], bounds = bounds)
+}
+## ============================================================================##
+
+
+## ============================================================================##
+## Convert the list to a dataframe
+## ============================================================================##
+rinat_df <- do.call(rbind.data.frame, plants) %>% 
+  as_tibble()
+
+rinat_df %>% 
+  head()
+## ============================================================================##
+
+```
+  
+### **Download GBIF data for a specific country**    
+  
+Finally, download all flowering plants (`Magnoliopsida`) occurring in Crete (or a polygon or even a country like Greece).
+
+```{r Download Greek GBIF plant data, eval = F}
+##============================================================================##
+## Use the name_suggest function to get the gbif taxon key
+##============================================================================##
+tax_key <- name_suggest(q = "Magnoliopsida", 
+                        rank = "Class")$data
+##============================================================================##
+
+
+##============================================================================##
+## Sometimes groups have multiple taxon keys, so we will
+## check how many records are available for them
+##============================================================================##
+lapply(tax_key$key, "occ_count")
+
+
+##============================================================================##
+## The first one is relevant
+##============================================================================##
+tax_key <- tax_key$key[1]
+##============================================================================##
+
+
+##============================================================================##
+## Let's download some plant species for Crete
+##============================================================================##
+data_gr <- occ_search(taxonKey = tax_key, 
+                      hasCoordinate = T, ## We only want data with coordinates
+                      geometry = ex2, ## Here we define our study area polygon
+                      limit = 40000) ## We only want 40000 occurrences
+##============================================================================##
+
+
+##============================================================================##
+## And keep only the actual data
+##============================================================================##
+data_gr <- data_gr$data
+##============================================================================##
+
+
+##============================================================================##
+## Save them
+##============================================================================##
+saveRDS(data_gr, "RDS/GBIF_Crete (40000) - raw.rds")
+##============================================================================##
+
+
+##============================================================================##
+## And keep only the actual data
+##============================================================================##
+data_gr <- data_gr$data
+##============================================================================##
+
+
+##============================================================================##
+## Check the taxon rank
+##============================================================================##
+data_gr %>% 
+  dplyr::count(taxonRank)
+
+
+##============================================================================##
+## Use CoordinateCleaner to clean the coordinates 
+##============================================================================##
+
+# We will  remove any records that are at the genus level or higher, and
+# those with missing coordinates or scientific names. Finally, we will create a
+# new column "Taxon" that combines the genus, specific epithet, and
+# infraspecific epithet (if it exists) into a single string.
+data_gr_cleaned <- data_gr %>% 
+  dplyr::filter(!str_detect(taxonRank, 'GENUS|FAMILY|FORM|CLASS')) %>%
+  drop_na(decimalLongitude, decimalLatitude, scientificName) %>%
+  mutate(
+    Taxon = case_when(
+      # If infraspecificEpithet exists and isn't blank, paste all three
+      !is.na(infraspecificEpithet) & infraspecificEpithet != "" ~ 
+        paste(genus, specificEpithet, infraspecificEpithet, sep = "_"),
+      
+      # Otherwise, just paste Genus and Species
+      TRUE ~ paste(genus, specificEpithet, sep = "_")
+    )
+  ) %>%
+  dplyr::filter(coordinateUncertaintyInMeters <= 5000 | is.na(coordinateUncertaintyInMeters)) %>%
+  distinct(Taxon, decimalLongitude, decimalLatitude, countryCode) %>% 
+  clean_coordinates(x = ., 
+                    lon = "decimalLongitude",
+                    lat = "decimalLatitude", 
+                    countries = "countryCode",
+                    species = "Taxon", 
+                    tests = c("capitals",
+                              "centroids", 
+                              "equal", 
+                              "gbif",
+                              "institutions",
+                              "zeros", 
+                              "seas"),
+                    seas_ref = Crete) %>% 
+  mutate(Data = ifelse(.summary == "TRUE",
+                       "Clean",
+                       "Flagged"),
+         NAME_1 = "Crete") %>% 
+  dplyr::filter(str_detect(Data,
+                           "Cle")) %>% 
+  dplyr::select(Taxon,
+                decimalLongitude,
+                decimalLatitude)
+
+saveRDS(data_gr_cleaned, "RDS/GBIF_Crete_Cleaned (40000).rds")
+
+
+##============================================================================##
+## Prepare and project the data for downstream biodiversity analyses
+##============================================================================##
+points_sf <- data_gr_cleaned %>%
+  st_as_sf(coords = c("decimalLongitude", "decimalLatitude"), crs = 4326) %>%
+  st_transform(2100) # Greek Grid
+
+```
+
+```{r Load the data, include = FALSE, cache = TRUE, eval = T}
+data_gr <- readRDS("RDS/GBIF_Crete (40000) - raw.rds")
+data_gr_cleaned <- readRDS("RDS/GBIF_Crete_Cleaned (40000).rds")
+
+points_sf <- data_gr_cleaned %>%
+  st_as_sf(coords = c("decimalLongitude", "decimalLatitude"), crs = 4326) %>%
+  st_transform(2100) # Greek Grid
+```
+
+We can now visualise these data. Let's see how many occurrences there are for each taxonomic unit (`taxonRank`), as well as which institutions host these plant taxa (`institutionCode`):
+
+```{r}
+## ============================================================================##
+## Taxonomic rank
+## ============================================================================##
+data_gr %>% dplyr::count(taxonRank)
+
+
+## ============================================================================##
+## Institution code
+## ============================================================================##
+data_gr %>% dplyr::count(institutionCode, sort = TRUE) %>% head()
+```
+
+As a next step, let’s see which Order, which Family, which Genus and which Species have the most occurrences in Crete, according to [GBIF](www.gbif.org):
+
+```{r}
+## ============================================================================##
+## Order
+## ============================================================================##
+data_gr %>% 
+  dplyr::count(order, sort = TRUE) %>%
+  drop_na(order) %>% 
+  filter(n > 100) %>% 
+    ggplot(aes(x = reorder(order, n),
+               y = n, 
+               fill = order)) + 
+  geom_bar(stat = "identity", 
+    show.legend = FALSE) +
+  labs(x = "Order", 
+       y = "Number of Occurrence Records (observations)") + 
+    coord_flip()
+
+
+## ============================================================================##
+## Family
+## ============================================================================##
+data_gr %>% 
+  dplyr::count(family, sort = TRUE) %>% 
+  drop_na(family) %>% 
+  filter(n > 
+    1000) %>% 
+  ggplot(aes(x = reorder(family, n),
+             y = n,
+             fill = family)) +
+  geom_bar(stat = "identity", 
+    show.legend = FALSE) + 
+  labs(x = "Family",
+       y = "Number of Occurrence Records (observations)") + 
+    coord_flip()
+
+
+## ============================================================================##
+## Genus
+## ============================================================================##
+data_gr %>% 
+  dplyr::count(genus, sort = TRUE) %>%
+  drop_na(genus) %>%
+  filter(n > 500) %>% 
+    ggplot(aes(x = reorder(genus, n),
+               y = n, 
+               fill = genus)) +
+  geom_bar(stat = "identity", 
+    show.legend = FALSE) + 
+  labs(x = "Genus",
+       y = "Number of Occurrence Records (observations)") + 
+    coord_flip()
+
+## ============================================================================##
+## Species
+## ============================================================================##
+data_gr %>% 
+  dplyr::count(scientificName, sort = TRUE) %>% 
+  drop_na(scientificName) %>% 
+    filter(n > 500) %>% 
+  ggplot(aes(x = reorder(scientificName, n),
+             y = n, 
+             fill = scientificName)) + 
+    geom_bar(stat = "identity",
+             show.legend = FALSE) + 
+  labs(x = "scientificName", 
+    y = "Number of Occurrence Records (observations)") + 
+  coord_flip()
+```
+
+> Run the above for the cleaned dataset (take care to recreate it as it does NOT contain the same columns as the original one). Do you see any differences in the most common taxa? Why do you think that is?
+
+**Hint:** You can use `skimr::skim(data_gr)` and `skimr::skim(flags_gbif)` to get a quick overview.
+
+
+## **Subset point data based on polygons**  
+  
+We can now see if there are any points occurring in a specific polygon (e.g., in Sfakia county). We will use spatial subsetting for this. 
+
+Spatial subsetting selects features that intersect (or otherwise relate to) another spatial object. `sf` and `terra` provide a clean `[ ]` interface for this.
+  
+```{r Spatial subsetting in Sfakia}
+## Convert GBIF data to sf
+data_gr_sf <- st_as_sf(data_gr,
+                       coords = c("decimalLongitude", "decimalLatitude"),
+                       crs    = 4326) %>% 
+  vect()
+
+## Build county objects
+Sfakia   <- Greece %>% filter(NAME_3 == "Sfakia")
+Rethymno <- Greece %>% filter(NAME_3 == "Rethymno")
+
+## Occurrences inside Sfakia / Rethymno
+occs_Sfakia        <- data_gr_sf[Sfakia]
+occs_Rethymno      <- data_gr_sf[Rethymno]
+
+## Occurrences NOT in Sfakia (using st_disjoint)
+occs_not_in_Sfakia <- data_gr_sf[!is.related(data_gr_sf, Sfakia, relation = "intersects"), ]
+```
+  
+  
+**Hint:** We could have used the `sf` equivalent `occs_not_in_Sfakia <- data_gr_sf[Sfakia, , op = st_disjoint]`.  Note the empty argument — denoted with `, ,` — in the preceding code chunk is included to highlight `op`, the third argument in `[` for `sf` objects. By using `st_disjoint`, we selected all the occurrences that are **not** present in Sfakia county.  
+
+
+Let's see what we have created:
+  
+```{r Plot Sfakia}
+plot(Crete)
+plot(Sfakia, add = TRUE, col = NULL, border = "red", lwd = 2)
+plot(occs_Sfakia,        add = TRUE, col = "blue")
+plot(occs_not_in_Sfakia, add = TRUE, col = "darkgreen")
+```
+  
+We can also count^[A word of caution: this is a **very** lengthy process for our dataset, so do **NOT** do it now; load the relevant rds file] occurrences and species per county with `st_join()` + `dplyr`:
+  
+```{r agg, include = FALSE, cache = TRUE, eval = TRUE}
+aggr_data <- readRDS("RDS/Crete aggregated data (40000).rds")
+```
+
+
+```{r Spatial aggregation, eval = F}
+aggr_data <- Crete %>% 
+  st_as_sf() %>% 
+  st_join(data_gr_sf %>% 
+            st_as_sf()) %>% 
+  
+  ## Here we group the data based on the county names
+  group_by(NAME_3) %>%
+  
+  summarise(
+    ## First we create a variable containing the sum of the species in each county
+    Species_Number    = n_distinct(scientificName, na.rm = TRUE),
+    
+    ## Then we just sum the number of occurrences in each county
+    Occurrence_Number = sum(!is.na(scientificName)),
+    .groups = "drop"
+  )
+
+plot(aggr_data["Occurrence_Number"])
+plot(aggr_data["Species_Number"])
+```
+
+
+# **Download raster data**   
+  
+Nowadays, there are several freely available raster databases for climate (e.g., [WorldClim](https://www.worldclim.org/), [CHELSA](http://chelsa-climate.org/), [Oscillayers](https://onlinelibrary.wiley.com/doi/full/10.1111/geb.12979), [PaleoClim](http://www.paleoclim.org/), [CliMond](https://www.climond.org/), [MerraClim](https://datadryad.org/stash/dataset/doi:10.5061/dryad.s2v81), [TerraClimate](http://www.climatologylab.org/terraclimate.html), [EuMedClim](https://www.frontiersin.org/articles/10.3389/fevo.2018.00031/full), [Envirem](https://envirem.github.io/)), soil ([SoilGrids](https://www.isric.org/explore/soilgrids)), topographical ([EarthEnv](http://www.earthenv.org/), [CGIAR](https://bigdata.cgiar.org/srtm-90m-digital-elevation-database/), [MERIT](http://hydro.iis.u-tokyo.ac.jp/~yamadai/MERIT_DEM/index.html)), geological (e.g., [GLIM](https://doi.pangaea.de/10.1594/PANGAEA.788537)) and LULC (Land Cover/Land Use - [Luh](https://luh.umd.edu/data.shtml)) data. Of course there are many other databases dealing with NVDI data, habitat heterogeneity, human population density etc. 
+  
+Today we deal with climate data from **WorldClim** (v2.1), accessed via the modern `geodata` package. WorldClim provides 19 bioclimatic variables:
+  
+<small>
+
+Var.          Description
+-    -
+BIO1          Annual Mean Temperature
+BIO2          Mean Diurnal Range (Mean of monthly (max temp − min temp))
+BIO3          Isothermality (BIO2/BIO7) (× 100)
+BIO4          Temperature Seasonality (standard deviation × 100)
+BIO5          Max Temperature of Warmest Month
+BIO6          Min Temperature of Coldest Month
+BIO7          Temperature Annual Range (BIO5-BIO6)
+BIO8          Mean Temperature of Wettest Quarter
+BIO9          Mean Temperature of Driest Quarter
+BIO10         Mean Temperature of Warmest Quarter
+BIO11         Mean Temperature of Coldest Quarter
+BIO12         Annual Precipitation
+BIO13         Precipitation of Wettest Month
+BIO14         Precipitation of Driest Month
+BIO15         Precipitation Seasonality (Coefficient of Variation)
+BIO16         Precipitation of Wettest Quarter
+BIO17         Precipitation of Driest Quarter
+BIO18         Precipitation of Warmest Quarter
+BIO19         Precipitation of Coldest Quarter
+
+</small>
+  
+For **future** climate, WorldClim now provides **CMIP6** projections (replacing CMIP5). You must specify a [Global Circulation Model](https://en.wikipedia.org/wiki/Climate_change_scenario), a [Shared Socioeconomic Pathway](https://en.wikipedia.org/wiki/Shared_Socioeconomic_Pathways) (SSP), and a time window. Choose GCMs carefully for your region [@McSweeney2015].
+  
+**Note**: WorldClim v2.1 stores bioclimatic temperature variables already in °C; the old `gain = 0.1` scaling step is **no longer needed**.
+
+```{r Download Climate Data, eval = F, cache = F}
+##============================================================================##
+## Current climate (WorldClim 2.1, 2.5-arcmin global)
+##============================================================================##
+current_climate <- geodata::worldclim_country("GRC", var = "bio",  res = 10,
+                                      path = getwd()) %>% 
+  terra::crop(Crete, mask = TRUE, snap = "in")
+
+## returns a SpatRaster with 19 layers
+
+## If you wanted to download the raw variables instead of the bioclimatic ones, you could do it like this:
+# mn_tm <- geodata::worldclim_country("GRC", var = "tmin", res = 10,
+#                                     path = getwd()) %>% 
+#   terra::crop(Greece, mask = TRUE, snap = "in")
+# 
+# mx_tm <- geodata::worldclim_country("GRC", var = "tmax", res = 10,
+#                                     path = getwd()) %>% 
+#   terra::crop(Greece, mask = TRUE, snap = "in")
+# 
+# prec  <- geodata::worldclim_country("GRC", var = "prec", res = 10,
+#                                     path = getwd()) %>% 
+#   terra::crop(Greece, mask = TRUE, snap = "in")
+```
+  
+
+```{r slow, include = FALSE, cache = TRUE, eval = T}
+current_climate <- readRDS("RDS/Current climate.rds")
+```
+  
+
+```{r Download Climate Data future, eval = F, cache = F}  
+##============================================================================##
+## Future climate (CMIP6, e.g., ACCESS-ESM1-5, SSP5-8.5, 2061-2080)
+##============================================================================##
+# A point roughly in Crete, to download only the relevant tile
+lon <- 23.47347
+lat <- 34.80069
+
+# Example: future minimum temperature, MPI-ESM1-2-HR, SSP 5-8.5, 2061–2080
+future_climate <- cmip6_tile(
+  lon   = lon,
+  lat   = lat,
+  model = "ACCESS-ESM1-5",   # GCM
+  ssp   = "585",             # "126", "245", "370", or "585"
+  time  = "2061-2080",       # "2021-2040", "2041-2060", "2061-2080", "2081-2100"
+  var   = "bioc",            # "tmin", "tmax", "prec", or "bioc"
+  path  = getwd()          # where the .tif is cached
+) %>% 
+  crop(., Crete,
+       mask = T, 
+       snap = 'in')
+
+plot(future_climate[[1]])
+```
+   
+
+```{r fut, include = FALSE, cache = TRUE, eval = T}
+future_climate <- readRDS("RDS/Future climate.rds")
+```
+
+   
+Rename the layers in a consistent way:
+  
+```{r Change names} 
+nice_names <- paste0("bio_", 1:19)
+names(current_climate) <- nice_names
+## names(future_climate) <- nice_names
+```
+  
+We can download elevation data for Greece via `geodata::elevation_30s()` or via the `elevatr` package, which uses a different data source and seems to work better for our area of interest. We will use the latter for now:
+
+```{r download the raw altitudinal data, eval = F, cache = F}
+
+## We won't use this for now, because for some reason a large chunk of Crete is missing (NA values).
+# altitude <- elevation_30s(country = "GRC",
+#                           mask = TRUE,
+#                           path = getwd()) %>% 
+#   tidyterra::filter(GRC_elv_msk >= 0) %>% 
+#   crop(., Crete,
+#        mask = T, 
+#        snap = 'in')
+
+altitude <- elevatr::get_elev_raster(
+  locations = Crete %>% 
+    st_as_sf() %>% 
+    st_cast("MULTIPOLYGON"), 
+  z = 9, 
+  clip = "locations",
+  neg_to_na = TRUE,
+  tmp_dir = getwd()
+) %>% 
+  rast()
+
+plot(altitude)
+
+names(altitude) <- 'elevation'
+```
+
+
+```{r, include = F, eval = T, cache = T}
+altitude <- readRDS("RDS/Altitude Crete.rds")
+```
+
+
+We can also create several topographical variables:
+
+```{r Create topographical variables}
+
+## Create topographical variables
+slope  <- terrain(altitude, "slope",  unit = "radians")
+aspect <- terrain(altitude, "aspect", unit = "radians")
+hill   <- shade(slope, aspect, angle = 30, direction = 270)
+tpi    <- terrain(altitude, "TPI")
+tri    <- terrain(altitude, "TRI")
+hli    <- spatialEco::hli(altitude, force.hemisphere = "northern")
+```
+
+We will resample these to the same resolution and extent as our climate data, so they can be stacked together without any issues. We will use bilinear interpolation for this, which is a common method for continuous variables like elevation and slope.
+
+```{r Resample topographical variables}
+## Bind them into one object
+topography <- c(altitude, slope, aspect, hill, tpi, tri, hli) %>% 
+  terra::resample(., 
+                   current_climate, 
+                   method = "bilinear")
+
+names(topography) <- c("elevation", "slope", "aspect", "hillshade", "tpi", "tri", "hli")
+```
+
+Then, we will stack those topographical variables with the bioclimatic ones, so we have a single `SpatRaster` object containing all the relevant predictors for our study area. This will make it easier to work with them in downstream analyses (e.g., species distribution modelling).
+
+```{r Bind them together}
+## Bind it with current bioclimatic variables
+current_climate <- c(current_climate, topography)
+```
+
+Through the `geodata` R package, we can easily download several other variables, such as human population density, soil properties, landcover classes and even the human footprint index. Let's see how to do that for Crete by cropping the global datasets to our area of interest.
+
+```{r Download other variables, eval = F, cache = F}
+## Download footprint data for Crete 
+footprint_crete <- geodata::footprint(year = 2009, 
+                                      path = getwd()) %>% 
+  crop(., 
+       Crete, 
+       mask = T, 
+       snap = 'in')
+
+names(footprint_crete) <- "footprint"
+
+
+pop <- geodata::population(year = 2020,
+                           res = 0.5,
+                           path = getwd())%>% 
+  crop(., 
+       Crete, 
+       mask = T, 
+       snap = 'in')
+
+names(pop) <- "population"
+```
+
+```{r pof, include = FALSE, cache = TRUE, eval = T}
+pop <- readRDS('RDS/Population Crete.rds')
+footprint_crete <- readRDS('RDS/Footprint Crete.rds')
+```
+
+
+Since the soil and landcover data are stored in separate files for each variable, we will need to download them one by one and then combine them into a single `SpatRaster`. The `soil_world()` function allows us to specify the variable, depth, and statistic we want to download.
+
+```{r Download soil data, eval = F, cache = F}
+# Soil property variables (excluding "wrb", which is the soil class map)
+soil_vars <- c("bdod", "cfvo", "clay", "nitrogen", "ocd",
+               "phh2o", "sand", "silt", "soc")
+
+# Pick a depth (5, 15, 30, 60, 100, 200) and statistic
+d   <- 5         # = 0–5 cm
+st  <- "mean"
+
+# Download each variable and combine
+soil_all <- rast(lapply(soil_vars, function(v) {
+  soil_world(var = v, depth = d, stat = st, path = getwd())
+}))
+names(soil_all) <- soil_vars
+
+# Crop & mask to Crete
+soil_crete <- soil_all %>% 
+  crop(., 
+       Crete,
+       mask = T, 
+       snap = 'in')
+
+plot(soil_crete[[1]])
+
+
+
+# All valid landcover classes (from ?landcover)
+lc_vars <- c("trees", "grassland", "shrubs", "cropland", "built",
+             "bare", "snow", "water", "wetland", "mangroves", "moss")
+
+# Download each layer and combine into one SpatRaster
+landcover_all <- rast(
+  lapply(lc_vars, function(v) landcover(var = v, path = getwd()))
+)
+
+# Name each layer after its class
+names(landcover_all) <- lc_vars
+
+landcover_all <- landcover_all %>% 
+  crop(., 
+       Crete,
+       mask = T, 
+       snap = 'in')
+plot(landcover_all[[1]])
+```
+
+
+```{r, include = FALSE, cache = TRUE, eval = T}
+soil_crete <- readRDS("RDS/Soil variables for Crete.rds")
+```
+
+Let's now stack them all together:
+
+```{r Stack all variables, eval = F}
+## Bind them all together
+current_climate <- c(current_climate, 
+                     pop,
+                     footprint_crete,
+                     soil_crete,
+                     landcover_all)
+
+## Convert any NA to 0 (e.g., for landcover classes, where NA = absence) and crop/mask again
+current_climate[is.na(current_climate)] <- 0
+
+current_climate <- current_climate %>% 
+  crop(., 
+       Crete,
+       mask = T, 
+       snap = 'in')
+
+```
+  
+> You can do the same for the future climate data.
+  
+  
+```{r all together, include = F, eval = T, cache = T}
+current_climate <- rast('RDS/All IVS.tif')
+```
+
+Plot using `tidyterra`'s `geom_spatraster()`:
+  
+```{r Plot rasters}
+ggplot() +
+  geom_spatvector(
+  data = Crete, 
+  # fill = color_land, 
+  color = 'black', 
+  linewidth = 0.3
+) +
+  geom_spatraster(data = current_climate,
+                  aes(fill = bio_1)) +
+  scale_fill_hypso_c(direction = -1, 
+                     palette = 'wiki-schwarzwald-cont') + 
+  ggtitle("Mean annual temperature in Crete") + 
+  
+  annotation_north_arrow(
+  location = "tr", # Top-Right (keeps it clear of Crete's long horizontal shape)
+  which_north = "true",
+  pad_x = unit(0.2, "in"), 
+  pad_y = unit(0.2, "in"),
+  style = north_arrow_fancy_orienteering(
+    fill = c("grey10", "white"),
+    line_col = "grey10"
+  )
+) +
+  
+  annotation_scale(
+    location = "bl", # Bottom-Left
+    width_hint = 0.15, 
+    style = "ticks", 
+    text_cex = 0.8, 
+    pad_x = unit(0.3, "in"),
+    pad_y = unit(0.3, "in")
+  ) +
+  geom_spatvector(
+  data = Crete, 
+  fill = NA,
+  color = 'black', 
+  linewidth = 0.3
+) +
+  theme_minimal() + 
+  theme(
+  
+  # Basic Plot Titles
+  plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+  axis.title = element_blank(), # Standard for map frames
+  
+  # Gridlines (Graticules) - Make them light, dashed white
+  panel.grid = element_line(color = "white", 
+                            linetype = "dashed",
+                            linewidth = 0.2), 
+  
+  # Legend Placement - Moving to the right looks cleaner when combined with scale elements
+  legend.position = "bottom",
+  legend.title = element_text(size = 10, face = "bold"),
+  legend.text = element_text(size = 9),
+  legend.direction = "horizontal",
+  
+  # Color the Sea
+  # panel.background = element_rect(fill = color_sea, color = NA),
+  plot.background = element_rect(fill = color_sea, color = NA),
+  
+  # Axis Text (Lat/Lon labels)
+  axis.text = element_text(size = 8, color = "grey30"),
+  
+  panel.grid.major = element_line(color = gray(0.5), 
+                                  linetype = "dashed", 
+                                  size = 0.5), 
+  
+  panel.background = element_rect(fill = col2alpha('steelblue', 0.15)))
+```
+  
+## **Calculate some statistics**  
+  
+`terra` provides `global()` (the modern equivalent of `cellStats()`) plus `summary()`, `hist()`, `boxplot()`, `density()`, and `pairs()` for `SpatRaster` objects.
+  
+```{r Raster statistics, eval = F}
+##============================================================================##
+## Summary statistics (mean, min, max, etc.)
+##============================================================================##
+global(current_climate, fun = "mean", na.rm = TRUE) 
+global(current_climate, fun = "sd",   na.rm = TRUE)
+summary(current_climate)
+```
+
+```{r}
+##============================================================================##
+## Density / boxplot / correlation plots
+##============================================================================##
+density(current_climate[[1:2]])
+boxplot(current_climate[[1:2]])
+pairs(current_climate[[1:2]])
+```
+  
+## **Correlation among raster data**  
+  
+To avoid multicollinearity in our downstream models (e.g., SDMs), we should not retain highly correlated predictors. The classic threshold is $r > 0.7$ and for Variance Inflation Factors is 2.5^[Dr. Blas Benito has an amazing article about this, which you can read it [here](https://www.blasbenito.com/2023/11/05/variance-inflation-factor/)]. We will use the `collinear` R package to do this:
+  
+```{r usdm}
+uncorrelated_vars <- collinear(current_climate %>%
+                                 as.data.frame(),
+                               max_cor = 0.7,
+                               max_vif = 2.5)$result$df %>%
+  as_tibble()
+
+uncorrelated_vars %>% head()
+```
+  
+## **Raster extraction**  
+  
+Raster extraction returns the values of a raster at the locations of a vector layer. We use `terra::extract()` directly on `sf` objects.
+
+The simplest example is extracting the value of a raster cell at specific points. For this purpose, we will use the point data we subsetted earlier, `occs_Sfakia` and `occs_Rethymno`. We will then compare if the species that are both present in these two spatial subsets have significantly different environmental preferences.  
+  
+```{r Extraction and ANOVA, eval = F}
+##============================================================================##
+## Extract climate at the GBIF occurrence points
+##============================================================================##
+Sfakia_data <- terra::extract(current_climate,
+                                occs_Sfakia,  
+                                method = "bilinear",
+                                xy = T)  %>% 
+  st_as_sf(coords = c("x", "y"), crs = 4326) 
+
+Rethymno_data <- terra::extract(current_climate, 
+                                occs_Rethymno,
+                                method = "bilinear",
+                                xy = T) %>% 
+  st_as_sf(coords = c("x", "y"), crs = 4326)
+
+##============================================================================##
+## Bind extracted values to the original sf attributes
+##============================================================================##
+occs_Sfakia_sf <- occs_Sfakia %>% 
+  st_as_sf()
+
+occs_Rethymno_sf <- occs_Rethymno %>% 
+  st_as_sf()
+
+Sfakia_data <- bind_cols(
+  st_coordinates(occs_Sfakia_sf) %>% 
+    as_tibble(),
+  Sfakia_data,
+  st_drop_geometry(occs_Sfakia_sf)
+) %>% 
+  st_as_sf(coords = c("X", "Y"), crs = 4326)
+
+Rethymno_data <- bind_cols(
+  st_coordinates(occs_Rethymno_sf) |> as_tibble(),
+  Rethymno_data,
+  st_drop_geometry(occs_Rethymno_sf)
+) %>% 
+  st_as_sf(coords = c("X", "Y"), crs = 4326)
+
+##============================================================================##
+## Per-species mean of bio_1 and bio_12
+##============================================================================##
+Sfakia_data_mean <- Sfakia_data %>% 
+  st_drop_geometry() %>% 
+  group_by(scientificName) %>% 
+  summarise(bio1_mean  = mean(bio_1,  na.rm = TRUE),
+            bio12_mean = mean(bio_12, na.rm = TRUE),
+            .groups = "drop")
+
+Rethymno_data_mean <- Rethymno_data %>% 
+  st_drop_geometry() %>% 
+  group_by(scientificName) %>% 
+  summarise(bio1_mean  = mean(bio_1,  na.rm = TRUE),
+            bio12_mean = mean(bio_12, na.rm = TRUE),
+            .groups = "drop")
+
+##============================================================================##
+## Keep ONLY species present in BOTH counties
+##============================================================================##
+common_sp <- intersect(Sfakia_data_mean$scientificName,
+                       Rethymno_data_mean$scientificName)
+
+Sfakia_subset   <- Sfakia_data_mean %>% 
+  filter(scientificName %in% common_sp)
+
+Rethymno_subset <- Rethymno_data_mean %>% 
+  filter(scientificName %in% common_sp)
+
+identical(sort(unique(Sfakia_subset$scientificName)),
+          sort(unique(Rethymno_subset$scientificName)))
+
+##============================================================================##
+## Build a long table and run ANOVA
+##============================================================================##
+Sfakia_Rethymno <- bind_rows(
+  Sfakia_subset %>% mutate(County = "Sfakia"),
+  Rethymno_subset %>% mutate(County = "Rethymno")
+) %>% 
+  mutate(County = factor(County))
+
+summary(aov(bio1_mean  ~ County, data = Sfakia_Rethymno))
+summary(aov(bio12_mean ~ County, data = Sfakia_Rethymno))
+```
+
+```{r aovaa, include = F, eval = T, cache = T}
+Sfakia_Rethymno <- readRDS('RDS/Sfakia Rethymno.rds')
+summary(aov(bio1_mean  ~ County, data = Sfakia_Rethymno))
+summary(aov(bio12_mean ~ County, data = Sfakia_Rethymno))
+```
+
+ 
+> Did we find any significant differences?
+
+
+# Macroecological patterns
+
+We can now use the cleaned occurrence data and the raster data to explore macroecological patterns in Crete. 
+
+First, let's create a phylogenetic tree based on a backbone megaphylogeny for the taxa occurring in Crete according to GBIF:
+
+## Megatree & phylogenetic tree
+
+```{r build-phylogeny, eval = FALSE, cache = TRUE}
+##============================================================================##
+## Pre-load the megatree ----
+##============================================================================##
+mega_tree <- megatrees::tree_plant_otl
+##============================================================================##
+
+##============================================================================##
+## Create the phylogenetic tree ----
+##============================================================================##
+phy <- get_tree(data_gr_cleaned %>% 
+                  distinct(Taxon) %>% 
+                  pull(Taxon),
+                taxon    = 'plant',
+                scenario = "random_below_basal",
+                mc_cores  = 20)
+
+saveRDS(phy, 'RDS/Phylogenetic tree for the Cretan taxa (40000).rds')
+##============================================================================##
+```
+
+```{r load-slow-file-phy, include = FALSE, cache = TRUE, eval = T}
+phy <- readRDS('RDS/Phylogenetic tree for the Cretan taxa (40000).rds')
+```
+
+Then, let's create a dataframe in the appropriate format for the `epm` package that we are going to use:
+
+```{r}
+# For point occurrences, epm expects a standard dataframe with 3 columns: [X, Y, taxon]
+epm_df <- data.frame(
+  x = st_coordinates(points_sf)[, "X"],
+  y = st_coordinates(points_sf)[, "Y"],
+  taxon = points_sf$Taxon
+)
+```
+
+Then, we will create the epm grid:
+
+```{r}
+##============================================================================##
+## Create the grid ----
+##============================================================================##
+# 3. Create the EcoPhyloMapper Grid Object
+# We define a 5000m (5km) hexagonal grid
+cretan_epm <- createEPMgrid(
+  spDat = epm_df,
+  resolution = 5000,           # 10,000 meters = 10km grid cells
+  cellType = "hexagon",        # Hexagons are great for natural boundaries
+  method = "percentOverlap",   # Better than centroid for irregular mountain tops
+  percentThreshold = 0.10,     # E.g., range must cover 10% of the cell to count
+  retainSmallRanges = TRUE,
+  # nThreads = 20              # Speed it up if your computer has multiple cores!
+  crs = 2100 
+)
+##============================================================================##
+```
+
+Then, let's add the phylogeny to the epm grid:
+
+```{r}
+cretan_epm <- addPhylo(cretan_epm, phy)
+```
+
+Now, let's ensure that we've kept only the taxa with both the phylogenetic and occurrence data:
+
+```{r}
+cretan_epm <- reduceToCommonTaxa(cretan_epm)
+```
+
+Now we are able to calculate several biodiversity metrics:
+
+```{r biodiv, eval = F}
+##============================================================================##
+## Estimate several metrics -----------
+##============================================================================##
+pbd_my_epm <- betadiv_phylogenetic(cretan_epm, 
+                                   radius = 10000, 
+                                   component = 'turnover')
+tbd_my_epm <- betadiv_taxonomic(cretan_epm,
+                                radius = 10000,
+                                component = 'turnover')
+
+pwe_my_epm <- gridMetrics(cretan_epm, 
+                          metric = 'phyloWeightedEndemism')
+cwe_my_epm <- gridMetrics(cretan_epm, 
+                          metric = 'correctedWeightedEndemism')
+we_my_epm <- gridMetrics(cretan_epm, 
+                         metric = 'weightedEndemism')
+
+psv_my_epm <- gridMetrics(cretan_epm, 
+                          metric = 'PSV')
+psr_my_epm <- gridMetrics(cretan_epm, 
+                          metric = 'PSR')
+pd_my_epm <- gridMetrics(cretan_epm, 
+                         metric = 'pd')
+##============================================================================##
+```
+Then, we will create a single shapefile with all the metrics, which we can then plot:
+
+```{r, include = F, eval = T, cache = T}
+mt_grid <- readRDS('RDS/Mt_grid.rds')
+```
+
+
+```{r mt-grid, eval = F}
+##============================================================================##
+## Create a single shapefile with all the metrics -----------
+##============================================================================##
+mt_grid <- cretan_epm$grid %>% 
+  dplyr::mutate(WE = we_my_epm$grid$weightedEndemism,
+                CWE = cwe_my_epm$grid$correctedWeightedEndemism,
+                PE = pwe_my_epm$grid$phyloWeightedEndemism,
+                SR = pwe_my_epm$grid$spRichness, 
+                PSV = psv_my_epm$grid$PSV,
+                PSR = psr_my_epm$grid$PSR,
+                PD = pd_my_epm$grid$pd, 
+                PBD = pbd_my_epm$phylogenetic_turnover,
+                TBD = tbd_my_epm$taxonomic_turnover) %>% 
+  dplyr::select(-spRichness)
+##============================================================================##
+```
+
+Now let's plot these metrics to explore the macroecological patterns in Crete. We will use `ggplot2` for this, and we can create a function to plot each metric with a consistent style.
+
+```{r}
+##============================================================================##
+## 5. Plot Metrics ----
+##============================================================================##
+
+# Define columns to plot and loop through them 
+# plot_metrics <- c("SR", "TBD", "PBD", "CWE", "WE", "PE", "PSV", "PSR", "PD")
+
+# Optional: set layout to view multiple plots at once, e.g., par(mfrow = c(3, 3))
+# for (metric in plot_metrics) {
+#   plot(mt_grid[metric], main = metric)
+# }
+
+metric_titles <- c(
+  WE  = "WE",
+  CWE = "CWE",
+  PE  = "PE",
+  SR  = "Species Richness",
+  PSV = "PSV",
+  PSR = "PSR",
+  PD  = "PD",
+  PBD = "Phylogenetic\u03B2-diversity",
+  TBD = "Taxonomic \u03B2-diversity"
+)
+
+mapRange1 <- c(range(st_coordinates(mt_grid)[, 1]),
+               range(st_coordinates(mt_grid)[, 2]))
+Crete_agg <- aggregate(Crete)
+
+# Let's create a function to plot each metric with a consistent style, so we can
+# easily compare them:
+plot_metric <- function(metric, data = mt_grid, basemap = Crete_agg,
+                        palette = "Spectral", n_breaks = 5) {
+  
+  vals <- data[[metric]]
+  vals <- vals[is.finite(vals)]              # drop NA/Inf
+  rng  <- range(vals, na.rm = TRUE)
+  
+  # nice rounded limits and breaks
+  brks   <- pretty(rng, n = n_breaks)
+  limits <- range(brks)                      # ensures breaks fit inside
+  
+  ttl <- metric_titles[[metric]] %||% metric # fallback to column name
+  
+  ggplot() +
+    theme(
+      panel.grid.major  = element_line(color = gray(0.5), linetype = "blank", size = 0.5),
+      panel.background  = element_rect(fill = col2alpha("steelblue", 0.2)),
+      axis.title        = element_blank(),
+      legend.position   = "bottom",
+      legend.key.width  = unit(2.5, "cm"),
+      legend.key        = element_rect(fill = "black", colour = "black"),
+      legend.title.align = 0.5,
+      text              = element_text(family = "Palatino Linotype",
+                                       face = "bold", size = 14),
+      panel.border      = element_rect(colour = "black", fill = NA, size = 1.2)
+    ) +
+    geom_spatvector(data = basemap, color = "black", fill = "grey85") +
+    geom_sf(data = data, aes(fill = .data[[metric]])) +
+    geom_spatvector(data = basemap, color = "black", fill = NA) +
+    scale_fill_distiller(
+      palette = palette,
+      limits  = limits,
+      breaks  = brks,
+      labels  = label_number(accuracy = if (max(abs(brks)) < 1) 0.01 else 1),
+      name    = bquote(bold(.(ttl)))
+    ) +
+    annotation_scale(
+      location = "br", width_hint = 0.2,
+      bar_cols = c("white", "black"),
+      text_family = "Palatino Linotype",
+      text_col = "black", text_cex = 1
+    ) +
+    annotation_north_arrow(
+      location = "tr", which_north = "true",
+      pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+      style = north_arrow_fancy_orienteering(
+        fill = "white", text_col = "black",
+        text_family = "Palatino Linotype", text_size = 12
+      )
+    ) +
+    guides(fill = guide_colorbar(title.position = "top",
+                                 frame.colour = "black",
+                                 frame.linewidth = 1.5)) 
+}
+
+# Let's run it
+metrics <- c("WE", "CWE", "PE", "SR", "PSV", "PSR", "PD", "PBD", "TBD")
+map(metrics, plot_metric) %>%  set_names(metrics)
+
+```
+
+
+
+# **Homework**    
+  
+1. Download PA (Protected Areas) and biotic (i.e., for any type of organism: animal or plant) data for any country you want.  
+2. Which county (**not** country) has the most species/occurrences? Present that visually.  
+3. How many species are present in that country?  
+4. Download raster data for the country you chose.  
+5. Which abiotic variables are correlated (threshold $> 0.7$) in that country?  
+6. Subset the species occurring in any two **counties** you want. Do they have the same or different ecological preferences?
+7. Build a phylogenetic tree for the species occurring in that country, and calculate some phylogenetic diversity metrics. Which county has the highest PD?
+
+# **Appendix: R code**  
+  
+```{r get-labels, echo = FALSE}
+labs <- knitr::all_labels(echo = TRUE)
+```
+
+```{r all-code, ref.label = labs, eval = FALSE}
+```  
+
+# **References**
