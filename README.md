@@ -9,7 +9,7 @@ A 2-day standalong workshop developed for the postgraduate students enrolled in 
 [![Publish](https://github.com/kkougiou/Botany_Upatras_2026/actions/workflows/publish.yml/badge.svg)](https://github.com/kkougiou/Botany_Upatras_2026/actions/workflows/publish.yml)
 [![Code style: tidyverse](https://img.shields.io/badge/code%20style-tidyverse-1F77B4.svg)](https://style.tidyverse.org/)
 
-> A two-day reproducible methodological seminar delivered at the **Department of Biology, University of Patras (2026)**, covering spatial data retrieval, cleaning, biodiversity analysis and species distribution modelling in R, with a Mediterranean focus.
+> A two-day reproducible methodological seminar delivered at the **Department of Biology, University of Patras (2026)**, covering spatial data retrieval, cleaning and macroecological analyses in R, with a Mediterranean focus.
 
 🌐 **Live slides:**
 
@@ -26,7 +26,7 @@ A 2-day standalong workshop developed for the postgraduate students enrolled in 
 | Day | Topic | File |
 |:---:|---|---|
 | **1** | Biodiversity metrics, β-diversity | `Biogeography.Rmd` | 
-| **2** | Spatial data retrieval, cleaning, harmonisation (SDMs) | `Spatial data.Rmd` |
+| **2** | Spatial data retrieval, cleaning, harmonisation | `Spatial-data.Rmd` |
 
 
 
@@ -116,9 +116,9 @@ Once it is done, you are 100% ready for the workshop!
 By the end of the seminar, participants will be able to:
 
 * Programmatically retrieve occurrence and environmental data from various databases.
-* Clean and harmonise geospatial data (CRS, taxonomy, coordinate quality).
+* Clean and harmonise geospatial data.
 * Compute and visualise α- and β-diversity across spatial grids.
-* Fit and spatially cross-validate species distribution models.
+
 
 
 ---
